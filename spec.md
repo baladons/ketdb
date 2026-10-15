@@ -10,7 +10,7 @@ This module will focus only on the storage format, caching layer and file IO of 
 
 Please see `footer.rs`.
 
-Essentially, data blocks store the actual data for a given column. To speedup lookups, we also store the min and max values of a given block as an entry inside the min and max blocks.
+Essentially, data blocks store the actual data for a given column. To speedup lookups, we also store the min and max values of a given block as an entry inside the min and max blocks for quick filtering based on range. This also allows us to do binary-search on the min blocks if the data is sorted.
 
 For example, assume we are in column 0 with the following two data blocks:
 
