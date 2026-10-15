@@ -48,7 +48,18 @@ impl TableReader {
             .await
             .into();
 
-        let data_block_index = min_block.internal_index_by_key(key).await.min(data_block_count - 1);
+        let min_block_start_data_block_index = self
+            .start_row_index(BlockType::Min, KEY_COLUMN_ID, min_block_index)
+            .await;
+
+        let mut index_in_min_block = min_block.internal_index_by_key(key).await;
+        // The search returns the first minimum that is >= `key`. A key that sits
+        // inside a data block is covered by the previous minimum.
+        if index_in_min_block == min_block.count() || min_block.get(index_in_min_block) > key {
+            index_in_min_block = index_in_min_block.saturating_sub(1);
+        }
+        let data_block_index = (min_block_start_data_block_index + index_in_min_block)
+            .min(data_block_count - 1);
 
         let data_block_start = self
             .start_row_index(BlockType::Data, KEY_COLUMN_ID, data_block_index)
@@ -69,13 +80,27 @@ impl TableReader {
         column_id: ColumnId,
         row_index: RowIndex,
     ) -> BlockIndex {
-        let row_index = row_index.to_le_bytes();
+        let block_count = self.len(BlockType::Data, column_id).await;
+        if block_count == 0 {
+            return 0;
+        }
 
-        binary_search(self.len(BlockType::Data, column_id).await, async |i| {
+        let index = binary_search(block_count, async |i| {
             self.start_row_index(BlockType::Data, column_id, i)
                 .await
-                .cmp(&u32::from_le_bytes(row_index))
+                .cmp(&row_index)
         })
-        .await
+        .await;
+
+        if index < block_count
+            && self
+                .start_row_index(BlockType::Data, column_id, index)
+                .await
+                == row_index
+        {
+            index
+        } else {
+            index.saturating_sub(1)
+        }
     }
 }

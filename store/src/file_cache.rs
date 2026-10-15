@@ -2,10 +2,9 @@ use std::num::NonZero;
 
 use compio::fs::{File, OpenOptions};
 use lru::LruCache;
-use uuid::Uuid;
 
 pub struct FileCache {
-    inner: LruCache<Uuid, File>,
+    inner: LruCache<String, File>,
 }
 
 impl FileCache {
@@ -15,21 +14,20 @@ impl FileCache {
         }
     }
 
-    pub async fn get(&mut self, id: Uuid) -> File {
-        if let Some(file) = self.inner.get(&id) {
+    pub async fn get(&mut self, path: &str) -> File {
+        if let Some(file) = self.inner.get(path) {
             return file.clone();
         }
 
-        let path = format!("data/{}.ket", id);
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .custom_flags(libc::O_DIRECT)
-            .open(&path)
+            .open(path)
             .await
             .unwrap();
-        self.inner.put(id, file.clone());
+        self.inner.put(path.to_string(), file.clone());
         file
     }
 }

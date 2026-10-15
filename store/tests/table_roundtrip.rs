@@ -2,20 +2,34 @@ use std::fs;
 
 use compio::runtime::Runtime;
 use format::{
+    batch::{Batch, BatchLayout},
     context::Context,
     footer::BlockEncoding,
+    table_cursor::TableCursor,
     table_reader::TableReader,
     table_writer::{ColumnConfig, TableWriter},
     types::{BlockType, KEY_COLUMN_ID},
 };
 use uuid::Uuid;
 
-fn bytes(value: u32) -> [u8; 4] {
+const ROW_COUNT: u32 = 1_000_000;
+const BATCH_SIZE: u32 = 4096;
+
+fn u32_bytes(value: u32) -> [u8; 4] {
     value.to_le_bytes()
 }
 
+fn batch_u32(batch: &Batch<'_>, index: usize) -> u32 {
+    let width = match batch.layout {
+        BatchLayout::Fixed(width) => width,
+        BatchLayout::Empty(_) | BatchLayout::Variable(_) => panic!("expected fixed-width batch"),
+    };
+    let offset = index * width;
+    u32::from_le_bytes(batch.data[offset..offset + width].try_into().unwrap())
+}
+
 #[test]
-fn table_writer_round_trips_data_and_indexing() {
+fn table_writer_round_trips_one_million_rows_via_cursor() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     std::env::set_current_dir(manifest_dir).unwrap();
     fs::create_dir_all("data").unwrap();
@@ -28,78 +42,64 @@ fn table_writer_round_trips_data_and_indexing() {
     Context::new(8).into_current();
 
     Runtime::new().unwrap().block_on(async {
+        let encoding = BlockEncoding {
+            key_id: 0,
+            compression: 0,
+        };
+
         let mut writer = TableWriter::new(
             table_id,
             vec![
                 ColumnConfig {
                     column_id: KEY_COLUMN_ID,
                     block_size: 12,
-                    block_encoding: BlockEncoding {
-                        key_id: 0,
-                        compression: 0,
-                    },
+                    block_encoding: encoding.clone(),
+                    bloom_expected_items: ROW_COUNT as usize,
                 },
                 ColumnConfig {
                     column_id: 1,
                     block_size: 12,
-                    block_encoding: BlockEncoding {
-                        key_id: 0,
-                        compression: 0,
-                    },
+                    block_encoding: encoding,
+                    bloom_expected_items: ROW_COUNT as usize,
                 },
             ],
         );
 
-        let rows = [
-            (1_u32, 10_u32),
-            (2_u32, 20_u32),
-            (3_u32, 30_u32),
-            (4_u32, 40_u32),
-            (5_u32, 50_u32),
-        ];
-
-        for (key, value) in rows {
-            writer.write(BlockType::Data, KEY_COLUMN_ID, &bytes(key)).await;
-            writer.write(BlockType::Data, 1, &bytes(value)).await;
+        for key in 1..=ROW_COUNT {
+            writer
+                .write(BlockType::Data, KEY_COLUMN_ID, &u32_bytes(key))
+                .await;
+            writer
+                .write(BlockType::Data, 1, &u32_bytes(key * 10))
+                .await;
         }
-
         writer.finish().await;
 
         let reader = TableReader::new(table_id);
+        let mut cursor =
+            TableCursor::seek_to_row_index(reader, 0, &[KEY_COLUMN_ID, 1]).await;
 
-        assert_eq!(reader.len(BlockType::Data, KEY_COLUMN_ID).await, 2);
-        assert_eq!(reader.len(BlockType::Min, KEY_COLUMN_ID).await, 1);
-        assert_eq!(reader.len(BlockType::Max, KEY_COLUMN_ID).await, 1);
-        assert_eq!(reader.len(BlockType::Bloom, KEY_COLUMN_ID).await, 1);
+        let mut batches = cursor.next(BATCH_SIZE).await;
+        let mut batch_index = 0usize;
 
-        assert_eq!(reader.len(BlockType::Data, 1).await, 2);
-        assert_eq!(reader.len(BlockType::Min, 1).await, 1);
-        assert_eq!(reader.len(BlockType::Max, 1).await, 1);
-        assert_eq!(reader.len(BlockType::Bloom, 1).await, 1);
+        for expected_key in 1..=ROW_COUNT {
+            if batch_index >= batches[0].len() {
+                batches = cursor.next(BATCH_SIZE).await;
+                batch_index = 0;
+                assert_ne!(
+                    batches[0].len(),
+                    0,
+                    "cursor ended before row {}",
+                    expected_key - 1
+                );
+            }
 
-        assert_eq!(reader.row_index_by_key(&bytes(1)).await, 0);
-        assert_eq!(reader.row_index_by_key(&bytes(4)).await, 3);
-        assert_eq!(reader.row_index_by_key(&bytes(5)).await, 4);
-
-        let first_key_block = reader.read(BlockType::Data, KEY_COLUMN_ID, 0).await;
-        assert_eq!(first_key_block.count(), 3);
-        assert_eq!(first_key_block.get(0), &bytes(1));
-        assert_eq!(first_key_block.get(2), &bytes(3));
-
-        let second_key_block = reader.read(BlockType::Data, KEY_COLUMN_ID, 1).await;
-        assert_eq!(second_key_block.count(), 2);
-        assert_eq!(second_key_block.get(0), &bytes(4));
-        assert_eq!(second_key_block.get(1), &bytes(5));
-
-        let first_value_block = reader.read(BlockType::Data, 1, 0).await;
-        assert_eq!(first_value_block.count(), 3);
-        assert_eq!(first_value_block.get(0), &bytes(10));
-        assert_eq!(first_value_block.get(2), &bytes(30));
-
-        let second_value_block = reader.read(BlockType::Data, 1, 1).await;
-        assert_eq!(second_value_block.count(), 2);
-        assert_eq!(second_value_block.get(0), &bytes(40));
-        assert_eq!(second_value_block.get(1), &bytes(50));
+            let key = batch_u32(&batches[0], batch_index);
+            let value = batch_u32(&batches[1], batch_index);
+            assert_eq!(key, expected_key);
+            assert_eq!(value, expected_key * 10);
+            batch_index += 1;
+        }
     });
 
     let _ = fs::remove_file(&file_path);

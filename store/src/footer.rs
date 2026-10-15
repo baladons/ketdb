@@ -12,6 +12,7 @@ pub struct BlockEncoding {
 pub struct BlockHandle {
     pub start_row_index: u32,
     pub start_offset: u64,
+    /// Encoded block length in bytes (not including page padding written to disk).
     pub end_offset: u64,
     pub checksum: u32,
     pub encoding: BlockEncoding,
@@ -33,6 +34,12 @@ pub struct Footer {
 }
 
 impl Footer {
+    pub fn contains_column(&self, column_id: ColumnId) -> bool {
+        self.columns
+            .iter()
+            .any(|column| column.column_id == column_id)
+    }
+
     pub fn column(&self, column_id: ColumnId) -> &ColumnHandle {
         self.columns
             .iter()

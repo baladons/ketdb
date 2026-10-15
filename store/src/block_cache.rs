@@ -53,10 +53,7 @@ impl BlockCache {
 
         let file = VirtualFile::new(table_id);
         let encoded = file
-            .read(
-                vec![0; (handle.end_offset - handle.start_offset) as usize],
-                handle.start_offset as usize,
-            )
+            .read(handle.end_offset as usize, handle.start_offset as usize)
             .await;
 
         let decoded = self.decoder.decode(

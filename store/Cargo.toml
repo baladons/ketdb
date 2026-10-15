@@ -16,3 +16,7 @@ aes-gcm = "0.11.1"
 fastbloom = "0.17.0"
 crc32c = "0.6.8"
 libc = "0.2.190"
+
+[[bench]]
+name = "store_rw"
+harness = false

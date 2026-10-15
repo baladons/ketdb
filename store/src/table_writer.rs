@@ -7,14 +7,16 @@ use crate::{
     block_writer::BlockWriter,
     encoding::BlockEncoder,
     footer::{BlockEncoding, BlockHandle, Footer},
-    types::{BlockType, ColumnId, RowIndex},
+    types::{BlockType, ColumnId, RowIndex, BLOOM_SEED},
     virtual_file::VirtualFile,
 };
 
+#[derive(Clone)]
 pub struct ColumnConfig {
     pub column_id: ColumnId,
     pub block_size: usize,
     pub block_encoding: BlockEncoding,
+    pub bloom_expected_items: usize,
 }
 
 pub struct TableWriter {
@@ -27,8 +29,10 @@ pub struct TableWriter {
     bloom_filters: Vec<Option<BloomFilter>>,
     column_configs: Vec<ColumnConfig>,
     row_indexes: Vec<RowIndex>,
-    min_row_indexes: Vec<RowIndex>,
-    max_row_indexes: Vec<RowIndex>,
+    /// First data block index covered by the in-memory min block being built.
+    min_start_data_block_indexes: Vec<u32>,
+    /// First data block index covered by the in-memory max block being built.
+    max_start_data_block_indexes: Vec<u32>,
 }
 
 impl TableWriter {
@@ -44,10 +48,16 @@ impl TableWriter {
             max_writers: writers(),
             bloom_filters: vec![None; column_configs.len()],
             row_indexes: vec![0; column_configs.len()],
-            min_row_indexes: vec![0; column_configs.len()],
-            max_row_indexes: vec![0; column_configs.len()],
+            min_start_data_block_indexes: vec![0; column_configs.len()],
+            max_start_data_block_indexes: vec![0; column_configs.len()],
             column_configs,
         }
+    }
+
+    fn data_block_count(&self, column_id: ColumnId) -> u32 {
+        self.footer
+            .block_handles(column_id, BlockType::Data)
+            .len() as u32
     }
 
     pub async fn write(&mut self, block_type: BlockType, column_id: ColumnId, data: &[u8]) {
@@ -70,20 +80,18 @@ impl TableWriter {
                 }
             }
             BlockType::Min => {
-                let writer = &mut self.min_writers[column_index];
-                if writer.count() == 0 {
-                    self.min_row_indexes[column_index] = self.row_indexes[column_index];
+                if self.min_writers[column_index].count() == 0 {
+                    self.min_start_data_block_indexes[column_index] =
+                        self.data_block_count(column_id).saturating_sub(1);
                 }
-
-                writer.write(data);
+                self.min_writers[column_index].write(data);
             }
             BlockType::Max => {
-                let writer = &mut self.max_writers[column_index];
-                if writer.count() == 0 {
-                    self.max_row_indexes[column_index] = self.row_indexes[column_index];
+                if self.max_writers[column_index].count() == 0 {
+                    self.max_start_data_block_indexes[column_index] =
+                        self.data_block_count(column_id).saturating_sub(1);
                 }
-
-                writer.write(data);
+                self.max_writers[column_index].write(data);
             }
             BlockType::Bloom => panic!("cannot write bloom blocks"),
         }
@@ -103,13 +111,13 @@ impl TableWriter {
 
         let file = VirtualFile::new(self.id);
         let start_offset = file.len().await as u64;
-        let end_offset = start_offset + encoded.len() as u64;
+        let buffer_length = encoded.len() as u64;
         file.append(&encoded).await;
 
         let handle = BlockHandle {
             start_row_index,
             start_offset,
-            end_offset,
+            end_offset: buffer_length,
             checksum,
             encoding,
             uncompressed_size,
@@ -141,8 +149,11 @@ impl TableWriter {
             (block, start_row_index, flushed_rows, min, max)
         };
 
+        let bloom_expected_items = self.column_configs[column_index].bloom_expected_items;
         let bloom_filter = self.bloom_filters[column_index].get_or_insert_with(|| {
-            BloomFilter::with_false_pos(0.01).expected_items(flushed_rows as usize)
+            BloomFilter::with_false_pos(0.01)
+                .seed(&BLOOM_SEED)
+                .expected_items(bloom_expected_items)
         });
         let block_reader = BlockReader::from(block.clone());
         for internal_index in 0..block_reader.count() {
@@ -160,23 +171,17 @@ impl TableWriter {
 
         self.row_indexes[column_index] = start_row_index + flushed_rows;
 
-        {
-            let min_writer = &mut self.min_writers[column_index];
-            if min_writer.count() == 0 {
-                self.min_row_indexes[column_index] = start_row_index;
-            }
-
-            min_writer.write(&min);
+        if self.min_writers[column_index].count() == 0 {
+            self.min_start_data_block_indexes[column_index] =
+                self.data_block_count(column_id) - 1;
         }
+        self.min_writers[column_index].write(&min);
 
-        {
-            let max_writer = &mut self.max_writers[column_index];
-            if max_writer.count() == 0 {
-                self.max_row_indexes[column_index] = start_row_index;
-            }
-
-            max_writer.write(&max);
+        if self.max_writers[column_index].count() == 0 {
+            self.max_start_data_block_indexes[column_index] =
+                self.data_block_count(column_id) - 1;
         }
+        self.max_writers[column_index].write(&max);
     }
 
     pub async fn finish(&mut self) {
@@ -190,33 +195,35 @@ impl TableWriter {
             }
 
             if self.min_writers[column_index].count() != 0 {
-                let start_row_index = self.min_row_indexes[column_index];
-                let flushed_rows = self.min_writers[column_index].count();
+                let start_data_block_index = self.min_start_data_block_indexes[column_index];
+                let entry_count = self.min_writers[column_index].count();
                 let block = self.min_writers[column_index].finish().to_vec();
                 self.write_block(
                     BlockType::Min,
                     column_id,
                     block,
-                    start_row_index,
+                    start_data_block_index,
                     encoding.clone(),
                 )
                 .await;
-                self.min_row_indexes[column_index] = start_row_index + flushed_rows;
+                self.min_start_data_block_indexes[column_index] =
+                    start_data_block_index + entry_count;
             }
 
             if self.max_writers[column_index].count() != 0 {
-                let start_row_index = self.max_row_indexes[column_index];
-                let flushed_rows = self.max_writers[column_index].count();
+                let start_data_block_index = self.max_start_data_block_indexes[column_index];
+                let entry_count = self.max_writers[column_index].count();
                 let block = self.max_writers[column_index].finish().to_vec();
                 self.write_block(
                     BlockType::Max,
                     column_id,
                     block,
-                    start_row_index,
+                    start_data_block_index,
                     encoding.clone(),
                 )
                 .await;
-                self.max_row_indexes[column_index] = start_row_index + flushed_rows;
+                self.max_start_data_block_indexes[column_index] =
+                    start_data_block_index + entry_count;
             }
 
             if let Some(bloom_filter) = self.bloom_filters[column_index].take() {
@@ -236,7 +243,12 @@ impl TableWriter {
         let file = VirtualFile::new(self.id);
         let footer_offset = file.len().await as u64;
         let footer_bytes = to_bytes::<Error>(&self.footer).unwrap().to_vec();
+        let footer_len = footer_bytes.len() as u64;
         file.append(&footer_bytes).await;
-        file.append(&footer_offset.to_le_bytes()).await;
+
+        let mut trailer = Vec::with_capacity(16);
+        trailer.extend_from_slice(&footer_offset.to_le_bytes());
+        trailer.extend_from_slice(&footer_len.to_le_bytes());
+        file.append(&trailer).await;
     }
 }

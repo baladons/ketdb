@@ -1,8 +1,8 @@
 use crate::{
-    batch::Batch,
+    batch::{Batch, BatchLayout},
     block_reader::BlockReader,
     table_reader::TableReader,
-    types::{BlockIndex, ColumnId, RowIndex},
+    types::{BlockIndex, BlockType, ColumnId, RowIndex},
 };
 
 pub struct BlockCursor {
@@ -20,12 +20,12 @@ impl BlockCursor {
             .await;
 
         let block = table
-            .read(crate::types::BlockType::Data, column_id, block_index)
+            .read(BlockType::Data, column_id, block_index)
             .await
             .into();
 
         let start_row_index = table
-            .start_row_index(crate::types::BlockType::Data, column_id, block_index)
+            .start_row_index(BlockType::Data, column_id, block_index)
             .await;
 
         let internal_index = row_index - start_row_index;
@@ -43,11 +43,7 @@ impl BlockCursor {
         self.block_index += 1;
         self.block = self
             .table
-            .read(
-                crate::types::BlockType::Data,
-                self.column_id,
-                self.block_index,
-            )
+            .read(BlockType::Data, self.column_id, self.block_index)
             .await
             .into();
         self.internal_index = 0;
@@ -55,6 +51,13 @@ impl BlockCursor {
 
     pub async fn next(&mut self, batch_size: u32) -> Batch<'_> {
         if self.internal_index >= self.block.count() {
+            let block_count = self.table.len(BlockType::Data, self.column_id).await;
+            if self.block_index + 1 >= block_count {
+                return Batch {
+                    data: &[],
+                    layout: BatchLayout::Fixed(1),
+                };
+            }
             self.next_block().await;
         }
 

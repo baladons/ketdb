@@ -24,6 +24,10 @@ impl BlockReader {
         crc32c::crc32c(&self.inner)
     }
 
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.inner
+    }
+
     fn as_u32_slice(&self) -> &[u32] {
         bytemuck::cast_slice(&self.inner)
     }
@@ -36,10 +40,17 @@ impl BlockReader {
     pub fn fixed_width(&self) -> Option<u32> {
         let slice = self.as_u32_slice();
         let fixed_width = slice[slice.len() - 2];
-        if fixed_width == 0 {
-            None
+        if fixed_width != 0 {
+            return Some(fixed_width);
+        }
+
+        // A zero width is the variable-width sentinel, unless the block has no offset
+        // table. That is a fixed-width block whose values are all empty.
+        let count = slice[slice.len() - 1] as usize;
+        if slice.len() < count + 2 {
+            Some(0)
         } else {
-            Some(fixed_width)
+            None
         }
     }
 
@@ -73,6 +84,7 @@ impl BlockReader {
         let data = &self.inner[start_offset..end_offset];
 
         let layout = match self.fixed_width() {
+            Some(0) => BatchLayout::Empty((end_index - internal_index) as usize),
             Some(fixed_width) => BatchLayout::Fixed(fixed_width as usize),
             None => {
                 let slice = self.as_u32_slice();

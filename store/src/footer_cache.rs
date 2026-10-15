@@ -4,7 +4,11 @@ use mini_moka::unsync::Cache;
 use rkyv::{from_bytes_unchecked, rancor::Error};
 use uuid::Uuid;
 
-use crate::{footer::Footer, virtual_file::VirtualFile};
+use crate::{
+    aligned_vec::page_align_down, footer::Footer, virtual_file::VirtualFile,
+};
+
+const FOOTER_TRAILER_LEN: usize = mem::size_of::<u64>() * 2;
 
 pub struct FooterCache {
     inner: Cache<Uuid, Rc<Footer>>,
@@ -24,13 +28,11 @@ impl FooterCache {
 
         let file = VirtualFile::new(id);
         let len = file.len().await;
-        let footer_offset_bytes = file
-            .read(vec![0; mem::size_of::<u64>()], len - mem::size_of::<u64>())
-            .await;
-        let footer_offset = u64::from_le_bytes(footer_offset_bytes.try_into().unwrap()) as usize;
-        let footer_bytes = file
-            .read(vec![0; len - mem::size_of::<u64>() - footer_offset], footer_offset)
-            .await;
+        let trailer_offset = page_align_down(len - 1);
+        let trailer = file.read(FOOTER_TRAILER_LEN, trailer_offset).await;
+        let footer_offset = u64::from_le_bytes(trailer[0..8].try_into().unwrap()) as usize;
+        let footer_len = u64::from_le_bytes(trailer[8..16].try_into().unwrap()) as usize;
+        let footer_bytes = file.read(footer_len, footer_offset).await;
         let footer = Rc::new(unsafe { from_bytes_unchecked::<Footer, Error>(&footer_bytes).unwrap() });
 
         self.inner.insert(id, footer.clone());

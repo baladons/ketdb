@@ -3,6 +3,7 @@ use futures::future::join_all;
 use crate::{batch::Batch, block_cursor::BlockCursor, table_reader::TableReader, types::ColumnId};
 
 pub struct TableCursor {
+    table: TableReader,
     cursors: Vec<BlockCursor>,
 }
 
@@ -25,7 +26,11 @@ impl TableCursor {
 
         let cursors = join_all(futures).await;
 
-        Self { cursors }
+        Self { table, cursors }
+    }
+
+    pub async fn has_value(&self, column_id: ColumnId, value: &[u8]) -> bool {
+        self.table.has_value(column_id, value).await
     }
 
     pub async fn next(&mut self, batch_size: u32) -> Vec<Batch<'_>> {
