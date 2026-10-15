@@ -1,0 +1,18 @@
+[package]
+name = "format"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bytemuck = "1.25.2"
+futures = "0.3.34"
+compio = { version = "0.19.2", features = ["macros", "fs"] }
+lru = "0.18.4"
+uuid = { version = "1.26.1", features = ["v7"] }
+mini-moka = "0.10.3"
+rkyv = "0.8.18"
+zstd = "0.14.0"
+aes-gcm = "0.11.1"
+fastbloom = "0.17.0"
+crc32c = "0.6.8"
+libc = "0.2.190"
