@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 
-pub async fn binary_search<C, F>(len: u32, mut compare: C) -> u32
+/// `Ok` is an equal entry. `Err` is the insertion point.
+pub async fn binary_search<C, F>(len: u32, mut compare: C) -> Result<u32, u32>
 where
     C: FnMut(u32) -> F,
     F: Future<Output = Ordering>,
@@ -14,9 +15,9 @@ where
         match compare(mid).await {
             Ordering::Less => low = mid + 1,
             Ordering::Greater => high = mid,
-            Ordering::Equal => return mid,
+            Ordering::Equal => return Ok(mid),
         }
     }
 
-    low
+    Err(low)
 }

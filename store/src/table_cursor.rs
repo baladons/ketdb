@@ -9,7 +9,9 @@ pub struct TableCursor {
 
 impl TableCursor {
     pub async fn seek_to_key(table: TableReader, key: &[u8], column_ids: &[ColumnId]) -> Self {
-        let row_index = table.row_index_by_key(key).await;
+        let row_index = match table.row_index_by_key(key).await {
+            Ok(index) | Err(index) => index,
+        };
 
         Self::seek_to_row_index(table, row_index, column_ids).await
     }

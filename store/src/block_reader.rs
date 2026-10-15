@@ -73,7 +73,7 @@ impl BlockReader {
         &self.inner[start..end]
     }
 
-    pub async fn internal_index_by_key(&self, key: &[u8]) -> RowIndex {
+    pub async fn internal_index_by_key(&self, key: &[u8]) -> Result<RowIndex, RowIndex> {
         binary_search(self.count(), async |i| self.get(i).cmp(key)).await
     }
 

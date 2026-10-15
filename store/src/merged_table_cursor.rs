@@ -235,7 +235,9 @@ impl<'a> MergedTableCursor<'a> {
                 continue;
             }
             let row_index = if let Some(key) = seek_key {
-                reader.row_index_by_key(key).await
+                match reader.row_index_by_key(key).await {
+                    Ok(index) | Err(index) => index,
+                }
             } else {
                 0
             };

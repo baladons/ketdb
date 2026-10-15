@@ -545,7 +545,9 @@ async fn locate_row(
         if rows == 0 {
             continue;
         }
-        let row = reader.row_index_by_key(key).await;
+        let Ok(row) = reader.row_index_by_key(key).await else {
+            continue;
+        };
         if row >= rows {
             continue;
         }
@@ -556,9 +558,7 @@ async fn locate_row(
         {
             continue;
         }
-        if delete_mask::key_at(&reader, row).await.as_deref() == Some(key) {
-            return Some((*id, row));
-        }
+        return Some((*id, row));
     }
     None
 }

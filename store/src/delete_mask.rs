@@ -99,23 +99,3 @@ pub async fn table_rows(reader: &TableReader) -> u32 {
     start + block.count()
 }
 
-pub async fn key_at(reader: &TableReader, row: u32) -> Option<Vec<u8>> {
-    let rows = table_rows(reader).await;
-    if row >= rows {
-        return None;
-    }
-    let block_index = reader
-        .data_block_index_by_row_index(KEY_COLUMN_ID, row)
-        .await;
-    let start = reader
-        .start_row_index(BlockType::Data, KEY_COLUMN_ID, block_index)
-        .await;
-    let block = reader
-        .read(BlockType::Data, KEY_COLUMN_ID, block_index)
-        .await;
-    let internal = row - start;
-    if internal >= block.count() {
-        return None;
-    }
-    Some(block.get(internal).to_vec())
-}

@@ -52,9 +52,9 @@ fn memtable_flushes_into_linked_tables_and_replays_wal() {
             assert_eq!(tables.len(), 1);
 
             let reader = TableReader::new(tables[0]);
-            assert_eq!(reader.row_index_by_key(b"a").await, 0);
-            assert_eq!(reader.row_index_by_key(b"b").await, 1);
-            assert_eq!(reader.row_index_by_key(b"c").await, 2);
+            assert_eq!(reader.row_index_by_key(b"a").await, Ok(0));
+            assert_eq!(reader.row_index_by_key(b"b").await, Ok(1));
+            assert_eq!(reader.row_index_by_key(b"c").await, Ok(2));
 
             let values = reader.read(BlockType::Data, 1, 0).await;
             assert_eq!(values.get(0), b"1");
@@ -81,12 +81,12 @@ fn memtable_flushes_into_linked_tables_and_replays_wal() {
         assert!(memtable.get(b"d").is_none());
 
         let reader = TableReader::new(tables[0]);
-        assert_eq!(reader.row_index_by_key(b"a").await, 0);
-        assert_eq!(reader.row_index_by_key(b"b").await, 1);
-        assert_eq!(reader.row_index_by_key(b"c").await, 2);
-        assert_eq!(reader.row_index_by_key(b"d").await, 3);
-        assert_eq!(reader.row_index_by_key(b"e").await, 4);
-        assert_eq!(reader.row_index_by_key(b"f").await, 5);
+        assert_eq!(reader.row_index_by_key(b"a").await, Ok(0));
+        assert_eq!(reader.row_index_by_key(b"b").await, Ok(1));
+        assert_eq!(reader.row_index_by_key(b"c").await, Ok(2));
+        assert_eq!(reader.row_index_by_key(b"d").await, Ok(3));
+        assert_eq!(reader.row_index_by_key(b"e").await, Ok(4));
+        assert_eq!(reader.row_index_by_key(b"f").await, Ok(5));
 
         memtable.insert(&[b"a", b"9"]).await;
         memtable.insert(&[b"g", b"7"]).await;
@@ -159,5 +159,33 @@ fn memtable_flushes_into_linked_tables_and_replays_wal() {
                 (b"g".to_vec(), b"7".to_vec()),
             ]
         );
+    });
+}
+
+#[test]
+fn flushed_tombstone_sets_the_bit_in_that_table_file() {
+    let _lock = common::DataLock::acquire();
+
+    Runtime::new().unwrap().block_on(async {
+        let mut memtable = MemTable::open_with_limit(configs(), 100).await;
+        memtable.insert(&[b"a", b"1"]).await;
+        memtable.insert(&[b"b", b"2"]).await;
+        memtable.insert(&[b"c", b"3"]).await;
+        memtable.flush().await;
+
+        memtable.delete(b"b").await;
+        memtable.delete(b"missing").await;
+        memtable.flush().await;
+
+        let tables = memtable.flushed_tables().await;
+        assert_eq!(tables.len(), 1);
+        let rows = format::delete_mask::table_rows(&TableReader::new(tables[0])).await;
+        assert_eq!(rows, 3);
+        let mask = DeleteMask::load(tables[0], rows).await;
+        assert!(!mask.is_set(0));
+        assert!(mask.is_set(1));
+        assert!(!mask.is_set(2));
+        assert_eq!(mask.deleted_count(rows), 1);
+        assert_eq!(metadata::load().await.group(0).deleted_rows, 1);
     });
 }

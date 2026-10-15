@@ -343,14 +343,13 @@ async fn read_flushed<'a>(
         if rows == 0 {
             continue;
         }
-        let row = reader.row_index_by_key(key).await;
+        let Ok(row) = reader.row_index_by_key(key).await else {
+            continue;
+        };
         if row >= rows {
             continue;
         }
         if delete_mask::is_set(table_id, row).await {
-            continue;
-        }
-        if delete_mask::key_at(&reader, row).await.as_deref() != Some(key) {
             continue;
         }
 
