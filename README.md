@@ -43,6 +43,7 @@ Contains the main storage utilities to be used by the storage engine:
 - `SegmentFooter` contains the handles to properly access the blocks within a segment.
 - `DeleteMask` is a bitmap that indicates which rows in a segment are logically deleted since segments are immutable.
 - `Batch` is a batch of values returned when reading a block.
+- Min-`Block` and Max-`Block` are special `Block` units used to store the range of values per block in a column. It can also be used by the cursor to do binary-search to find the block that contains the value.
 
 ### Engine
 
