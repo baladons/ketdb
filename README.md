@@ -47,9 +47,16 @@ Contains the main storage utilities to be used by the storage engine:
 
 ### Engine
 
-Contains the cursor utilities to be used by the storage engine:
+Contains the storage engine:
 - `BlockCursor` is used to seek and read values from a block.
 - `SegmentCursor` combines the `BlockCursors` of the requested columns.
 - `OrderedTableCursor` combines the `SegmentCursors` of a table with merge-sort to return the rows ordered by the first column. This is useful to retrieve few rows that are properly index.
 - `TableCursor` combines the `SegmentCursors` of a table without any order guarantees. This is useful for analytical queries that need to scan the entire table.
 - `Compactor` is used to merge segments that are logically smaller than a certain threshold into a single segment. This will use the `OrderedTableCursor`.
+- `MemTable` is the row-oriented in-memory table that aggregates the writes before flushing them to disk. This adds support for transactional writes and reads.
+- `Wal` is the write-ahead log to store changes that are not flushed to disk yet.
+- `Table` is the main transactional interface to read and write data to a table.
+
+### Executor
+
+Contains the query execution utilities to be used by the database.
