@@ -25,6 +25,8 @@ Typically, we don't want to encrypt all the data using a single key and we don't
 
 ## Packages
 
+The packages are roughly divided in a way to prevent circular dependencies.
+
 ### Storage
 
 Contains the main storage utilities to be used by the storage engine:
@@ -39,13 +41,13 @@ Contains the main storage utilities to be used by the storage engine:
 - `KeyVault` is a cache that maps `FileId` to the pain text key.
 - `SegmentFooter` contains the handles to properly access the blocks within a segment.
 - `DeleteMask` is a bitmap that indicates which rows in a segment are logically deleted since segments are immutable.
-- `Compactor` is used to merge segments that are logically smaller than a certain threshold into a single segment.
 - `Batch` is a batch of values returned when reading a block.
 
-### Cursor
+### Engine
 
 Contains the cursor utilities to be used by the storage engine:
 - `BlockCursor` is used to seek and read values from a block.
 - `SegmentCursor` combines the `BlockCursors` of the requested columns.
 - `OrderedTableCursor` combines the `SegmentCursors` of a table with merge-sort to return the rows ordered by the first column. This is useful to retrieve few rows that are properly index.
 - `TableCursor` combines the `SegmentCursors` of a table without any order guarantees. This is useful for analytical queries that need to scan the entire table.
+- `Compactor` is used to merge segments that are logically smaller than a certain threshold into a single segment. This will use the `OrderedTableCursor`.
