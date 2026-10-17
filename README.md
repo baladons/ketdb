@@ -2,7 +2,8 @@
 
 Thread-per-core distributed HTAP database powered by io-uring.
 
-> [!WARNING] This project is work in progress :construction:
+> [!WARNING]
+> This project is work in progress :construction:
 
 ## Features
 
