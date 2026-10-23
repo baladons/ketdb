@@ -31,15 +31,17 @@ The packages are roughly divided in a way to prevent circular dependencies.
 ### Storage
 
 Contains the main storage utilities to be used by the storage engine:
+- `Storage` owns a `FrameManager`, a `KeyManager`, and a `FileManager`. It is the interface for reading and writing frames and for inserting and expiring keys.
 - `Frame` are the cooridnates to a buffer in a file. Where is the buffer? How is it encoded?
-- `FrameManager` caches buffers after decoding them from read operations. It also supports writing.
+- `FrameManager` caches buffers after decoding them from read operations. It also supports writing. Methods that touch files or keys take a `&mut FileManager` and a `&mut KeyManager`.
+- `FileManager` caches open files by `FileId`.
 - `Segment` contains part of the rows in the table. All rows within it are sorted by the first column (column 0).
 - `SegmentMut` is used to create new segments and write them to disk.
 - `Column` contains all the blocks for a column in a segment.
 - `Block` contains the underlying values for a column in a segment.
 - `BlockMut` is the mutable version of the block. This is used inside `SegmentMut`.
 - `Buffer` is the page aligned buffer that is used to read and write data to disk.
-- `KeyVault` is a cache that maps `FileId` to the pain text key.
+- `KeyManager` is a cache that maps `FileId` to the plain text key.
 - `SegmentFooter` contains the handles to properly access the blocks within a segment.
 - `DeleteMask` is a bitmap that indicates which rows in a segment are logically deleted since segments are immutable.
 - `Batch` is a batch of values returned when reading a block.

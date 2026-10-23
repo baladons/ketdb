@@ -1,4 +1,7 @@
-use std::{collections::HashMap, time::{Duration, Instant}};
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 
 use secrecy::{ExposeSecret, SecretSlice};
 
@@ -9,11 +12,11 @@ pub struct KeyEntry {
     last_access: Instant,
 }
 
-pub struct KeyVault {
+pub struct KeyManager {
     keys: HashMap<FileId, KeyEntry>,
 }
 
-impl KeyVault {
+impl KeyManager {
     pub fn new() -> Self {
         Self {
             keys: HashMap::new(),
@@ -39,5 +42,10 @@ impl KeyVault {
         let now = Instant::now();
         self.keys
             .retain(|_, entry| now.duration_since(entry.last_access) <= max_age);
+    }
+
+    pub async fn get_encryption_key(&mut self, file_id: FileId) -> &[u8] {
+        let _ = file_id;
+        unimplemented!()
     }
 }
