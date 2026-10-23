@@ -49,8 +49,8 @@ pub struct Frame {
     pub encoding: Encoding,
     pub uncompressed_size: u32,
     pub crc: u32,
+    pub len: u32,
     pub offset: u64,
-    pub len: u64,
 }
 
 #[derive(Clone, Archive, Deserialize, Serialize)]

@@ -16,12 +16,12 @@ use crate::{
     key_manager::KeyManager,
 };
 
-pub struct FrameManager {
+pub struct BufferManager {
     temp_buffers: Vec<Buffer>,
     buffer_cache: Cache<(FileId, u64), Rc<Buffer>>,
 }
 
-impl FrameManager {
+impl BufferManager {
     pub fn new(n_bytes: u64) -> Self {
         Self {
             temp_buffers: Vec::new(),
@@ -108,7 +108,7 @@ impl FrameManager {
 
         let mut file = files.get_file(id.clone()).await?;
 
-        let len = temp_buffer.len() as u64;
+        let len = temp_buffer.len() as u32;
         let crc = crc32c::crc32c(&temp_buffer);
 
         temp_buffer.before_write();
@@ -130,8 +130,12 @@ impl FrameManager {
     }
 
     fn get_temp_buffer(&mut self, size: usize) -> Buffer {
-        self.temp_buffers
+        let mut buffer = self
+            .temp_buffers
             .pop()
-            .unwrap_or_else(|| Buffer::with_capacity(size))
+            .unwrap_or_else(|| Buffer::with_capacity(size));
+
+        buffer.clear();
+        buffer
     }
 }

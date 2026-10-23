@@ -2,16 +2,18 @@ use std::{rc::Rc, time::Duration};
 
 use crate::{
     buffer::Buffer,
+    buffer_manager::BufferManager,
     dtos::{Encoding, Frame},
     error::Error,
     file_id::FileId,
     file_manager::FileManager,
-    frame_manager::FrameManager,
     key_manager::KeyManager,
+    last_frame_manager::LastFrameManager,
 };
 
 pub struct Storage {
-    frame_manager: FrameManager,
+    buffer_manager: BufferManager,
+    last_frame_manager: LastFrameManager,
     key_manager: KeyManager,
     file_manager: FileManager,
 }
@@ -19,7 +21,8 @@ pub struct Storage {
 impl Storage {
     pub fn new(n_files: u64, n_bytes: u64) -> Self {
         Self {
-            frame_manager: FrameManager::new(n_bytes),
+            buffer_manager: BufferManager::new(n_bytes),
+            last_frame_manager: LastFrameManager::new(),
             key_manager: KeyManager::new(),
             file_manager: FileManager::new(n_files),
         }
@@ -31,7 +34,7 @@ impl Storage {
         frame: Frame,
         check_crc: bool,
     ) -> Result<&Rc<Buffer>, Error> {
-        self.frame_manager
+        self.buffer_manager
             .read(
                 &mut self.file_manager,
                 &mut self.key_manager,
@@ -49,7 +52,7 @@ impl Storage {
         buffer: &Buffer,
         encoding: Encoding,
     ) -> Result<Frame, Error> {
-        self.frame_manager
+        self.buffer_manager
             .write(
                 &mut self.file_manager,
                 &mut self.key_manager,
@@ -58,6 +61,18 @@ impl Storage {
                 buffer,
                 encoding,
             )
+            .await
+    }
+
+    pub async fn read_last_frame(&mut self, id: FileId) -> Result<Frame, Error> {
+        self.last_frame_manager
+            .read_last_frame(&mut self.file_manager, id)
+            .await
+    }
+
+    pub async fn write_last_frame(&mut self, id: FileId, frame: Frame) -> Result<(), Error> {
+        self.last_frame_manager
+            .write_last_frame(&mut self.file_manager, id, frame)
             .await
     }
 

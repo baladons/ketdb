@@ -31,9 +31,10 @@ The packages are roughly divided in a way to prevent circular dependencies.
 ### Storage
 
 Contains the main storage utilities to be used by the storage engine:
-- `Storage` owns a `FrameManager`, a `KeyManager`, and a `FileManager`. It is the interface for reading and writing frames and for inserting and expiring keys.
+- `Storage` owns a `BufferManager`, a `LastFrameManager`, a `KeyManager`, and a `FileManager`. It is the interface for reading and writing frames and for inserting and expiring keys.
 - `Frame` are the cooridnates to a buffer in a file. Where is the buffer? How is it encoded?
-- `FrameManager` caches buffers after decoding them from read operations. It also supports writing. Methods that touch files or keys take a `&mut FileManager` and a `&mut KeyManager`.
+- `BufferManager` caches buffers after decoding them from read operations. It also supports writing. Methods that touch files or keys take a `&mut FileManager` and a `&mut KeyManager`.
+- `LastFrameManager` caches the last-frame pointer per `FileId` and reads or writes it on the file's last page.
 - `FileManager` caches open files by `FileId`.
 - `Segment` contains part of the rows in the table. All rows within it are sorted by the first column (column 0).
 - `SegmentMut` is used to create new segments and write them to disk.

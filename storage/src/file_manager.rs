@@ -22,4 +22,9 @@ impl FileManager {
 
         Ok(self.file_cache.get(&id).expect("unreachable"))
     }
+
+    pub async fn file_len(&mut self, id: FileId) -> Result<u64, Error> {
+        let file = self.get_file(id).await?;
+        Ok(file.metadata().await.map_err(Error::IoError)?.len())
+    }
 }
