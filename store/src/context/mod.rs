@@ -147,7 +147,7 @@ impl Context {
             .await
     }
 
-    pub(crate) fn recycle_encoded_buffer(&mut self, buffer: Buffer) {
+    pub(crate) fn recycle_buffer(&mut self, buffer: Buffer) {
         self.buffer_pool.recycle(buffer);
     }
 

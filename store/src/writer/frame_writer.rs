@@ -56,7 +56,7 @@ impl FrameWriter {
         let offset = self.offset;
         let BufResult(result, encoded) = self.file.write_all_at(encoded, offset).await;
         result.map_err(Error::IoError)?;
-        context.recycle_encoded_buffer(encoded);
+        context.recycle_buffer(encoded);
 
         self.offset = (offset + len as u64).next_multiple_of(PAGE_SIZE as u64);
 
