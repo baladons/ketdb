@@ -1360,7 +1360,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "storage"
+name = "store"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",

@@ -9,14 +9,14 @@ use crate::{
 
 use super::segment_cursor::SegmentCursor;
 
-pub struct UnorderedCursor {
+pub struct ScanCursor {
     file_ids: Vec<FileId>,
     segment_index: usize,
     column_ids: Vec<u32>,
     segment_cursor: SegmentCursor,
 }
 
-impl UnorderedCursor {
+impl ScanCursor {
     pub async fn seek_first(
         file_ids: Vec<FileId>,
         column_ids: Vec<u32>,

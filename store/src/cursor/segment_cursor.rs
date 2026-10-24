@@ -5,7 +5,7 @@ use super::block_cursor::BlockCursor;
 pub struct SegmentCursor {
     segment: Segment,
     column_ids: Vec<u32>,
-    blocks: Vec<BlockCursor>,
+    cursors: Vec<BlockCursor>,
 }
 
 impl SegmentCursor {
@@ -28,8 +28,8 @@ impl SegmentCursor {
     }
 
     pub async fn advance(&mut self, storage: &mut Storage, count: u32) -> Result<bool, Error> {
-        for block in &mut self.blocks {
-            if !block.advance(&self.segment, storage, count).await? {
+        for cursor in &mut self.cursors {
+            if !cursor.advance(&self.segment, storage, count).await? {
                 return Ok(false);
             }
         }
@@ -46,23 +46,23 @@ impl SegmentCursor {
     }
 
     pub fn row_index(&self) -> u32 {
-        self.blocks
+        self.cursors
             .first()
             .map(BlockCursor::row_index)
             .unwrap_or(0)
     }
 
     pub fn block_cursors(&self) -> &[BlockCursor] {
-        &self.blocks
+        &self.cursors
     }
 
     pub fn blocks(&self) -> Vec<&Block> {
-        self.blocks.iter().map(BlockCursor::block).collect()
+        self.cursors.iter().map(BlockCursor::block).collect()
     }
 
     pub fn batch_read(&self) -> Vec<Batch<'_>> {
         let batches = self
-            .blocks
+            .cursors
             .iter()
             .map(BlockCursor::batch)
             .collect::<Vec<_>>();
@@ -80,16 +80,16 @@ impl SegmentCursor {
         storage: &mut Storage,
         row_index: u32,
     ) -> Result<Self, Error> {
-        let mut blocks = Vec::with_capacity(column_ids.len());
+        let mut cursors = Vec::with_capacity(column_ids.len());
 
         for column_id in &column_ids {
-            blocks.push(BlockCursor::at_row_index(&segment, *column_id, row_index, storage).await?);
+            cursors.push(BlockCursor::at_row_index(&segment, *column_id, row_index, storage).await?);
         }
 
         Ok(Self {
             segment,
             column_ids,
-            blocks,
+            cursors,
         })
     }
 }
