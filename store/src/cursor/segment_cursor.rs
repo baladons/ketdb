@@ -27,14 +27,14 @@ impl SegmentCursor {
         Self::at_row_index(segment, column_ids, storage, row_index).await
     }
 
-    pub async fn advance(&mut self, storage: &mut Storage, count: u32) -> Result<bool, Error> {
+    /// Returns how many rows of `count` could not be advanced (`0` if all succeeded).
+    pub async fn advance(&mut self, storage: &mut Storage, count: u32) -> Result<u32, Error> {
+        let mut remaining = 0u32;
         for cursor in &mut self.cursors {
-            if !cursor.advance(&self.segment, storage, count).await? {
-                return Ok(false);
-            }
+            remaining = remaining.max(cursor.advance(&self.segment, storage, count).await?);
         }
 
-        Ok(true)
+        Ok(remaining)
     }
 
     pub fn segment(&self) -> &Segment {

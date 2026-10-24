@@ -53,34 +53,77 @@ impl BlockCursor {
             .batch((self.row_index - self.row_offset) as usize)
     }
 
+    /// Advance up to `count` rows within this segment column. Returns how many could not
+    /// be advanced (e.g. asked for 20, advanced 5 → returns 15).
     pub async fn advance(
         &mut self,
         segment: &Segment,
         storage: &mut Storage,
         count: u32,
-    ) -> Result<bool, Error> {
-        self.row_index += count;
+    ) -> Result<u32, Error> {
+        let mut remaining = count;
 
-        if self.row_index < self.row_offset + self.block.len() as u32 {
-            return Ok(true);
-        }
+        loop {
+            let block_end = self.row_offset + self.block.len() as u32;
 
-        let block_index = match segment.block_index_from_row_index(self.column_id, self.row_index) {
-            Ok(index) => index,
-            Err(_) => {
-                self.row_index -= count;
-                return Ok(false);
+            if remaining > 0 && self.row_index < block_end {
+                let rows_left = block_end - self.row_index;
+                let step = remaining.min(rows_left);
+                self.row_index += step;
+                remaining -= step;
+                continue;
             }
-        };
 
-        let (block, handle) = segment
-            .block(storage, BlockKind::Data, self.column_id, block_index)
-            .await?;
+            if self.row_index < block_end {
+                return Ok(remaining);
+            }
 
-        self.row_offset = handle.row_offset.to_native();
-        self.block_index = block_index;
-        self.block = block;
+            let column = segment
+                .column(self.column_id)
+                .ok_or(Error::DeserializationFailure)?;
+            let handles = column.data_blocks.as_slice();
 
-        Ok(true)
+            let mut block_index = self.block_index;
+            let mut loaded = false;
+            while block_index < handles.len() {
+                let start = handles[block_index].row_offset.to_native();
+                if start > self.row_index {
+                    break;
+                }
+                let end = start + handles[block_index].row_len.to_native();
+                if self.row_index < end {
+                    let (block, handle) = segment
+                        .block(storage, BlockKind::Data, self.column_id, block_index)
+                        .await?;
+
+                    self.row_offset = handle.row_offset.to_native();
+                    self.block_index = block_index;
+                    self.block = block;
+                    loaded = true;
+                    break;
+                }
+                block_index += 1;
+            }
+
+            if !loaded {
+                if let Some(last) = handles.last() {
+                    let segment_end = last.row_offset.to_native() + last.row_len.to_native();
+                    let last_row = segment_end - 1;
+                    if self.row_index > last_row {
+                        let overshoot = self.row_index - last_row;
+                        self.row_index = last_row;
+                        if remaining == 0 {
+                            return Ok(overshoot);
+                        }
+                        return Ok(remaining);
+                    }
+                }
+                return Ok(remaining);
+            }
+
+            if remaining == 0 {
+                return Ok(0);
+            }
+        }
     }
 }

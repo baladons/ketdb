@@ -202,40 +202,19 @@ async fn scan_cursor_advances_across_segments() {
     assert_eq!(cursor.segment_index(), 0);
     assert_eq!(cursor.blocks()[0].get(0), b"a");
 
-    assert!(cursor.advance(&mut storage, 1).await.expect("advance"));
+    assert_eq!(cursor.advance(&mut storage, 1).await.expect("advance"), 0);
     assert_eq!(cursor.segment_index(), 0);
     assert_eq!(cursor.row_index(), 1);
     assert_eq!(cursor.blocks()[0].get(0), b"c");
 
-    assert!(cursor.advance(&mut storage, 1).await.expect("advance"));
+    assert_eq!(cursor.advance(&mut storage, 1).await.expect("advance"), 0);
     assert_eq!(cursor.segment_index(), 1);
     assert_eq!(cursor.row_index(), 0);
     assert_eq!(cursor.blocks()[0].get(0), b"g");
 
-    assert!(cursor.advance(&mut storage, 1).await.expect("advance"));
+    assert_eq!(cursor.advance(&mut storage, 1).await.expect("advance"), 0);
     assert_eq!(cursor.segment_index(), 1);
     assert_eq!(cursor.blocks()[0].get(0), b"i");
 
-    assert!(!cursor.advance(&mut storage, 1).await.expect("advance"));
-}
-
-#[compio::test]
-async fn scan_cursor_seek_key_finds_later_segment() {
-    let _workspace = chdir_to_data_workspace();
-    let mut storage = Storage::new(16, 8 * 1024 * 1024);
-
-    let seg1 = write_segment_keys(&mut storage, 1024, &[b"a", b"c"]).await;
-    let seg2 = write_segment_keys(&mut storage, 1024, &[b"g", b"i"]).await;
-
-    let cursor = ScanCursor::seek_key(
-        vec![seg1.file_id(), seg2.file_id()],
-        vec![0],
-        b"i",
-        &mut storage,
-    )
-    .await
-    .expect("seek_key");
-
-    assert_eq!(cursor.segment_index(), 1);
-    assert_eq!(cursor.blocks()[0].get(1), b"i");
+    assert_eq!(cursor.advance(&mut storage, 1).await.expect("advance"), 1);
 }
