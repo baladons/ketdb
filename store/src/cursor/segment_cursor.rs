@@ -62,7 +62,7 @@ impl SegmentCursor {
         self.cursors.iter().map(BlockCursor::block).collect()
     }
 
-    pub fn batch_read(&self) -> Vec<Batch<'_>> {
+    pub fn batch(&self) -> Vec<Batch<'_>> {
         let batches = self
             .cursors
             .iter()

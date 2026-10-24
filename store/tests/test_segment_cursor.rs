@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 use store::{
     binary_search::SearchResult,
-    cursor::{ScanCursor, SegmentCursor},
+    cursor::{MergeCursor, ScanCursor, SegmentCursor},
     file_id::FileId,
     segment::Segment,
     writer::{FrameWriter, SegmentWriter},
@@ -131,7 +131,7 @@ async fn cursor_seek_key_finds_row_block() {
     assert_eq!(cursor.blocks()[0].get(1), b"c");
     assert_eq!(cursor.blocks()[1].get(1), b"v2");
 
-    let batches = cursor.batch_read();
+    let batches = cursor.batch();
     assert_eq!(batches.len(), 2);
     assert_eq!(batches[0].len(), 2);
     assert_eq!(batches[1].len(), 2);
@@ -180,7 +180,7 @@ async fn scan_cursor_opens_first_segment_from_disk() {
     assert_eq!(cursor.current_file_id(), file_id);
     assert_eq!(cursor.segment_index(), 0);
     assert_eq!(cursor.blocks()[0].get(0), b"a");
-    assert_eq!(cursor.batch_read()[1].len(), 3);
+    assert_eq!(cursor.batch()[1].len(), 3);
 }
 
 #[compio::test]
@@ -217,4 +217,47 @@ async fn scan_cursor_advances_across_segments() {
     assert_eq!(cursor.blocks()[0].get(0), b"i");
 
     assert_eq!(cursor.advance(&mut context, 1).await.expect("advance"), 1);
+}
+
+#[compio::test]
+async fn merge_cursor_merges_segments_by_key() {
+    let _workspace = chdir_to_data_workspace();
+    let mut context = Context::new(16, 8 * 1024 * 1024);
+
+    let seg1 = write_segment_keys(&mut context, 0, &[b"a", b"c", b"e"]).await;
+    let seg2 = write_segment_keys(&mut context, 0, &[b"b", b"d", b"f"]).await;
+
+    let mut cursor = MergeCursor::seek_first(
+        vec![seg1.file_id(), seg2.file_id()],
+        vec![0],
+        &mut context,
+    )
+    .await
+    .expect("seek_first");
+
+    for key in [b"a".as_slice(), b"b", b"c", b"d", b"e", b"f"] {
+        assert_eq!(cursor.blocks()[0].get(0), key);
+        assert_eq!(cursor.advance(&mut context, 1).await.expect("advance"), 0);
+    }
+    assert_eq!(cursor.advance(&mut context, 1).await.expect("advance"), 1);
+}
+
+#[compio::test]
+async fn merge_cursor_batch_stops_at_next_segment_key() {
+    let _workspace = chdir_to_data_workspace();
+    let mut context = Context::new(16, 8 * 1024 * 1024);
+
+    let seg1 = write_segment_keys(&mut context, 1024, &[b"a", b"c", b"e"]).await;
+    let seg2 = write_segment_keys(&mut context, 1024, &[b"b"]).await;
+
+    let cursor = MergeCursor::seek_first(
+        vec![seg1.file_id(), seg2.file_id()],
+        vec![0],
+        &mut context,
+    )
+    .await
+    .expect("seek_first");
+
+    assert_eq!(cursor.blocks()[0].get(0), b"a");
+    assert_eq!(cursor.batch()[0].len(), 1);
 }

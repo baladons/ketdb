@@ -17,7 +17,7 @@ impl ScanCursor {
         column_ids: Vec<u32>,
         context: &mut Context,
     ) -> Result<Self, Error> {
-        let file_id = file_ids.first().ok_or(Error::DeserializationFailure)?;
+        let file_id = file_ids.first().unwrap();
         let segment = Segment::open(context, *file_id).await?;
         let segment_cursor =
             SegmentCursor::seek_first(segment, column_ids.clone(), context).await?;
@@ -71,7 +71,7 @@ impl ScanCursor {
         self.segment_cursor.blocks()
     }
 
-    pub fn batch_read(&self) -> Vec<Batch<'_>> {
-        self.segment_cursor.batch_read()
+    pub fn batch(&self) -> Vec<Batch<'_>> {
+        self.segment_cursor.batch()
     }
 }
