@@ -17,3 +17,6 @@ crc32c = "0.6.8"
 libc = "0.2.190"
 slab = "0.4.12"
 secrecy = "0.10.3"
+
+[dev-dependencies]
+tempfile = "3.24.0"

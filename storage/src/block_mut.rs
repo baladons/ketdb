@@ -26,8 +26,32 @@ impl BlockMut {
 
     pub fn read(&self, index: usize) -> &[u8] {
         let start = self.footer.offsets[index] as usize;
-        let end = self.footer.offsets[index + 1] as usize;
+        let end = if index + 1 < self.footer.offsets.len() {
+            self.footer.offsets[index + 1] as usize
+        } else {
+            self.buffer.len()
+        };
         &self.buffer[start..end]
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub fn entry_count(&self) -> usize {
+        self.len
+    }
+
+    pub fn buffer_len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    pub fn min_index(&self) -> usize {
+        self.min
+    }
+
+    pub fn max_index(&self) -> usize {
+        self.max
     }
 
     pub fn write(&mut self, data: &[u8]) {
@@ -66,13 +90,17 @@ impl BlockMut {
         }
     }
 
-    pub fn flush(&mut self) -> Result<(), Error> {
-        let footer_offset = self.buffer.len() as u32;
-        self.footer.offsets.push(footer_offset);
+    pub fn flush(&mut self) -> Result<usize, Error> {
+        let footer_offset = self.buffer.len();
+        self.footer.offsets.push(footer_offset as u32);
 
         to_bytes_in::<_, rkyv::rancor::Error>(&self.footer, &mut *self.buffer)
             .map_err(|_| Error::SerializationFailure)?;
 
-        Ok(())
+        Ok(footer_offset)
+    }
+
+    pub fn into_buffer(self) -> Buffer {
+        self.buffer
     }
 }

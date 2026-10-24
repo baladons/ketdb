@@ -2,27 +2,28 @@ use rkyv::{Archive, Deserialize, Serialize};
 
 #[derive(Clone, Archive, Deserialize, Serialize)]
 pub struct SegmentFooter {
-    columns: Vec<ColumnHandle>,
-    wrapped_key: Option<Vec<u8>>,
+    pub columns: Vec<ColumnHandle>,
+    pub wrapped_key: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Archive, Deserialize, Serialize)]
 pub struct ColumnHandle {
-    id: u32,
-    data_blocks: Vec<BlockHandle>,
-    min_blocks: Vec<BlockHandle>,
-    max_blocks: Vec<BlockHandle>,
-    bloom_filter: Frame,
+    pub id: u32,
+    pub data_blocks: Vec<BlockHandle>,
+    pub min_blocks: Vec<BlockHandle>,
+    pub max_blocks: Vec<BlockHandle>,
+    pub bloom_filter: Frame,
 }
 
 #[derive(Clone, Archive, Deserialize, Serialize)]
 pub struct BlockHandle {
-    frame: Frame,
-    row_offset: u32,
-    row_len: u32,
+    pub frame: Frame,
+    pub footer_offset: u32,
+    pub row_offset: u32,
+    pub row_len: u32,
 }
 
-#[derive(Debug, Clone, Archive, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Archive, Deserialize, Serialize)]
 pub struct Encoding {
     pub encrypted: bool,
     pub compression: u8, // 0 is no ZSTD compression

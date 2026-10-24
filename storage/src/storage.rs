@@ -1,9 +1,12 @@
 use std::{rc::Rc, time::Duration};
 
 use crate::{
+    block::Block,
     buffer::Buffer,
     buffer_manager::BufferManager,
+    buffer_pool::BufferPool,
     dtos::{Encoding, Frame},
+    encoder::Encoder,
     error::Error,
     file_id::FileId,
     file_manager::FileManager,
@@ -13,6 +16,8 @@ use crate::{
 
 pub struct Storage {
     buffer_manager: BufferManager,
+    buffer_pool: BufferPool,
+    encoder: Encoder,
     last_frame_manager: LastFrameManager,
     key_manager: KeyManager,
     file_manager: FileManager,
@@ -22,10 +27,23 @@ impl Storage {
     pub fn new(n_files: u64, n_bytes: u64) -> Self {
         Self {
             buffer_manager: BufferManager::new(n_bytes),
+            buffer_pool: BufferPool::new(),
+            encoder: Encoder::new(),
             last_frame_manager: LastFrameManager::new(),
             key_manager: KeyManager::new(),
             file_manager: FileManager::new(n_files),
         }
+    }
+
+    pub async fn read_block(
+        &mut self,
+        id: FileId,
+        frame: Frame,
+        footer_offset: usize,
+        check_crc: bool,
+    ) -> Result<Block, Error> {
+        let buffer = self.read(id, frame, check_crc).await?.clone();
+        Block::new(buffer, footer_offset)
     }
 
     pub async fn read(
@@ -36,6 +54,8 @@ impl Storage {
     ) -> Result<&Rc<Buffer>, Error> {
         self.buffer_manager
             .read(
+                &mut self.buffer_pool,
+                &self.encoder,
                 &mut self.file_manager,
                 &mut self.key_manager,
                 id,
@@ -54,6 +74,8 @@ impl Storage {
     ) -> Result<Frame, Error> {
         self.buffer_manager
             .write(
+                &mut self.buffer_pool,
+                &self.encoder,
                 &mut self.file_manager,
                 &mut self.key_manager,
                 id,
@@ -66,13 +88,13 @@ impl Storage {
 
     pub async fn read_last_frame(&mut self, id: FileId) -> Result<Frame, Error> {
         self.last_frame_manager
-            .read_last_frame(&mut self.file_manager, id)
+            .read_last_frame(&mut self.buffer_pool, &mut self.file_manager, id)
             .await
     }
 
     pub async fn write_last_frame(&mut self, id: FileId, frame: Frame) -> Result<(), Error> {
         self.last_frame_manager
-            .write_last_frame(&mut self.file_manager, id, frame)
+            .write_last_frame(&mut self.buffer_pool, &mut self.file_manager, id, frame)
             .await
     }
 
@@ -83,32 +105,37 @@ impl Storage {
     pub fn cleanup_keys(&mut self, max_age: Duration) {
         self.key_manager.cleanup(max_age);
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use crate::{buffer::Buffer, dtos::Encoding, file_id::FileId, storage::Storage};
-
-    #[compio::test]
-    async fn test_write_read() {
-        let mut storage = Storage::new(10, 1024 * 1024);
-
-        let file_id = FileId::new_segment();
-        let offset = 0;
-        let data = b"Hello world!".repeat(10);
-        let mut buffer = Buffer::new();
-        buffer.extend_from_slice(&data);
-
-        let frame = storage
-            .write(file_id.clone(), offset, &buffer, Encoding::compressed())
+    pub(crate) async fn encode_buffer(
+        &mut self,
+        id: FileId,
+        buffer: &Buffer,
+        encoding: Encoding,
+    ) -> Result<Buffer, Error> {
+        self.encoder
+            .encode(
+                &mut self.buffer_pool,
+                &mut self.key_manager,
+                id,
+                buffer,
+                encoding,
+            )
             .await
-            .expect("test");
+    }
 
-        let read_buffer = storage
-            .read(file_id.clone(), frame, true)
-            .await
-            .expect("test");
+    pub(crate) fn recycle_encoded_buffer(&mut self, buffer: Buffer) {
+        self.buffer_pool.recycle(buffer);
+    }
 
-        assert_eq!(&read_buffer[..], data);
+    pub(crate) fn buffer_pool_mut(&mut self) -> &mut BufferPool {
+        &mut self.buffer_pool
+    }
+
+    pub(crate) fn invalidate_cached_frame(&mut self, id: FileId, offset: u64) {
+        self.buffer_manager.invalidate(id, offset);
+    }
+
+    pub(crate) fn cache_last_frame(&mut self, id: FileId, frame: Frame) {
+        self.last_frame_manager.cache_last_frame(id, frame);
     }
 }

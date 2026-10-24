@@ -24,19 +24,26 @@ impl FileId {
     }
 
     pub async fn open(&self, flags: i32) -> Result<File, Error> {
+        self.open_with_flags(Some(flags)).await
+    }
+
+    pub async fn open_buffered(&self) -> Result<File, Error> {
+        self.open_with_flags(None).await
+    }
+
+    async fn open_with_flags(&self, flags: Option<i32>) -> Result<File, Error> {
         let path = match &self {
             FileId::Segment(uuid) => format!("data/{}.seg", uuid),
             FileId::Mask(uuid) => format!("data/{}.mask", uuid),
             FileId::Metadata => "data/metadata".to_string(),
         };
 
-        OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .custom_flags(flags)
-            .open(path)
-            .await
-            .map_err(Error::IoError)
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true);
+        if let Some(flags) = flags {
+            options.custom_flags(flags);
+        }
+
+        options.open(path).await.map_err(Error::IoError)
     }
 }
