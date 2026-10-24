@@ -2,9 +2,10 @@ use crate::{
     block_mut::BlockMut,
     dtos::{BlockHandle, Encoding},
     error::Error,
-    frame_writer::FrameWriter,
     storage::Storage,
 };
+
+use super::frame_writer::FrameWriter;
 
 pub struct BlockWriter {
     active: BlockMut,

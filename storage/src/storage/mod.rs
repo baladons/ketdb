@@ -1,17 +1,27 @@
+mod buffer_manager;
+mod buffer_pool;
+mod encoder;
+mod file_manager;
+mod key_manager;
+mod last_frame_manager;
+
+pub use buffer_manager::BufferManager;
+pub use buffer_pool::BufferPool;
+pub use encoder::Encoder;
+pub use file_manager::FileManager;
+pub use key_manager::{KeyEntry, KeyManager};
+pub use last_frame_manager::{
+    last_frame_page_offset, last_page_offset, write_last_frame_page_bytes, LastFrameManager,
+};
+
 use std::{rc::Rc, time::Duration};
 
 use crate::{
     block::Block,
     buffer::Buffer,
-    buffer_manager::BufferManager,
-    buffer_pool::BufferPool,
     dtos::{Encoding, Frame},
-    encoder::Encoder,
     error::Error,
     file_id::FileId,
-    file_manager::FileManager,
-    key_manager::KeyManager,
-    last_frame_manager::LastFrameManager,
 };
 
 pub struct Storage {

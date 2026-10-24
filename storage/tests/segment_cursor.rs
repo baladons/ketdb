@@ -2,12 +2,11 @@ use std::fs;
 use std::sync::Mutex;
 
 use storage::{
-    cursor::Cursor,
+    binary_search::SearchResult,
+    cursor::{SegmentCursor, UnorderedCursor},
     file_id::FileId,
-    frame_writer::FrameWriter,
     segment::Segment,
-    segment_writer::SegmentWriter,
-    sequential_cursor::SequentialCursor,
+    writer::{FrameWriter, SegmentWriter},
     storage::Storage,
 };
 
@@ -84,9 +83,18 @@ async fn segment_writer_flush_produces_searchable_segment() {
     let mut storage = Storage::new(16, 8 * 1024 * 1024);
     let segment = write_segment(&mut storage, 1024).await;
 
-    assert_eq!(segment.search(&mut storage, b"a").await.expect("search"), 0);
-    assert_eq!(segment.search(&mut storage, b"c").await.expect("search"), 0);
-    assert_eq!(segment.search(&mut storage, b"e").await.expect("search"), 0);
+    assert_eq!(
+        segment.search_row_index(&mut storage, b"a").await.expect("search"),
+        SearchResult::Found(0)
+    );
+    assert_eq!(
+        segment.search_row_index(&mut storage, b"c").await.expect("search"),
+        SearchResult::Found(1)
+    );
+    assert_eq!(
+        segment.search_row_index(&mut storage, b"e").await.expect("search"),
+        SearchResult::Found(2)
+    );
 }
 
 #[compio::test]
@@ -95,7 +103,7 @@ async fn cursor_seek_first_loads_aligned_columns() {
     let mut storage = Storage::new(16, 8 * 1024 * 1024);
     let segment = write_segment(&mut storage, 1024).await;
 
-    let cursor = Cursor::seek_first(segment, vec![0, 1], &mut storage)
+    let cursor = SegmentCursor::seek_first(segment, vec![0, 1], &mut storage)
         .await
         .expect("seek_first");
 
@@ -115,18 +123,18 @@ async fn cursor_seek_key_finds_row_block() {
     let mut storage = Storage::new(16, 8 * 1024 * 1024);
     let segment = write_segment(&mut storage, 1024).await;
 
-    let cursor = Cursor::seek_key(segment, vec![0, 1], b"c", &mut storage)
+    let cursor = SegmentCursor::seek_key(segment, vec![0, 1], b"c", &mut storage)
         .await
         .expect("seek_key");
 
-    assert_eq!(cursor.row_index(), 0);
+    assert_eq!(cursor.row_index(), 1);
     assert_eq!(cursor.blocks()[0].get(1), b"c");
     assert_eq!(cursor.blocks()[1].get(1), b"v2");
 
     let batches = cursor.batch_read();
     assert_eq!(batches.len(), 2);
-    assert_eq!(batches[0].len(), 3);
-    assert_eq!(batches[1].len(), 3);
+    assert_eq!(batches[0].len(), 2);
+    assert_eq!(batches[1].len(), 2);
 }
 
 #[compio::test]
@@ -136,29 +144,38 @@ async fn cursor_seek_key_across_data_blocks() {
     // Flush after each key once the block exceeds one byte (keys `a`+`c`, then `e`).
     let segment = write_segment(&mut storage, 1).await;
 
-    assert_eq!(segment.search(&mut storage, b"a").await.expect("search"), 0);
-    assert_eq!(segment.search(&mut storage, b"c").await.expect("search"), 0);
-    assert_eq!(segment.search(&mut storage, b"e").await.expect("search"), 1);
+    assert_eq!(
+        segment.search_row_index(&mut storage, b"a").await.expect("search"),
+        SearchResult::Found(0)
+    );
+    assert_eq!(
+        segment.search_row_index(&mut storage, b"c").await.expect("search"),
+        SearchResult::Found(1)
+    );
+    assert_eq!(
+        segment.search_row_index(&mut storage, b"e").await.expect("search"),
+        SearchResult::Found(2)
+    );
 
-    let cursor = Cursor::seek_key(segment, vec![0], b"e", &mut storage)
+    let cursor = SegmentCursor::seek_key(segment, vec![0], b"e", &mut storage)
         .await
         .expect("seek_key");
 
-    assert_eq!(cursor.row_index(), 1);
+    assert_eq!(cursor.row_index(), 2);
     assert_eq!(cursor.blocks()[0].len(), 1);
     assert_eq!(cursor.blocks()[0].get(0), b"e");
 }
 
 #[compio::test]
-async fn sequential_cursor_opens_first_segment_from_disk() {
+async fn unordered_cursor_opens_first_segment_from_disk() {
     let _workspace = chdir_to_data_workspace();
     let mut storage = Storage::new(16, 8 * 1024 * 1024);
     let segment = write_segment(&mut storage, 1024).await;
     let file_id = segment.file_id();
 
-    let cursor = SequentialCursor::seek_first(vec![file_id], vec![0, 1], &mut storage)
+    let cursor = UnorderedCursor::seek_first(vec![file_id], vec![0, 1], &mut storage)
         .await
-        .expect("sequential seek_first");
+        .expect("unordered seek_first");
 
     assert_eq!(cursor.current_file_id(), file_id);
     assert_eq!(cursor.segment_index(), 0);
@@ -167,14 +184,14 @@ async fn sequential_cursor_opens_first_segment_from_disk() {
 }
 
 #[compio::test]
-async fn sequential_cursor_advances_across_segments() {
+async fn unordered_cursor_advances_across_segments() {
     let _workspace = chdir_to_data_workspace();
     let mut storage = Storage::new(16, 8 * 1024 * 1024);
 
     let seg1 = write_segment_keys(&mut storage, 0, &[b"a", b"c"]).await;
     let seg2 = write_segment_keys(&mut storage, 0, &[b"g", b"i"]).await;
 
-    let mut cursor = SequentialCursor::seek_first(
+    let mut cursor = UnorderedCursor::seek_first(
         vec![seg1.file_id(), seg2.file_id()],
         vec![0],
         &mut storage,
@@ -185,32 +202,32 @@ async fn sequential_cursor_advances_across_segments() {
     assert_eq!(cursor.segment_index(), 0);
     assert_eq!(cursor.blocks()[0].get(0), b"a");
 
-    assert!(cursor.advance(&mut storage).await.expect("advance"));
+    assert!(cursor.advance(&mut storage, 1).await.expect("advance"));
     assert_eq!(cursor.segment_index(), 0);
     assert_eq!(cursor.row_index(), 1);
     assert_eq!(cursor.blocks()[0].get(0), b"c");
 
-    assert!(cursor.advance(&mut storage).await.expect("advance"));
+    assert!(cursor.advance(&mut storage, 1).await.expect("advance"));
     assert_eq!(cursor.segment_index(), 1);
     assert_eq!(cursor.row_index(), 0);
     assert_eq!(cursor.blocks()[0].get(0), b"g");
 
-    assert!(cursor.advance(&mut storage).await.expect("advance"));
+    assert!(cursor.advance(&mut storage, 1).await.expect("advance"));
     assert_eq!(cursor.segment_index(), 1);
     assert_eq!(cursor.blocks()[0].get(0), b"i");
 
-    assert!(!cursor.advance(&mut storage).await.expect("advance"));
+    assert!(!cursor.advance(&mut storage, 1).await.expect("advance"));
 }
 
 #[compio::test]
-async fn sequential_cursor_seek_key_finds_later_segment() {
+async fn unordered_cursor_seek_key_finds_later_segment() {
     let _workspace = chdir_to_data_workspace();
     let mut storage = Storage::new(16, 8 * 1024 * 1024);
 
     let seg1 = write_segment_keys(&mut storage, 1024, &[b"a", b"c"]).await;
     let seg2 = write_segment_keys(&mut storage, 1024, &[b"g", b"i"]).await;
 
-    let cursor = SequentialCursor::seek_key(
+    let cursor = UnorderedCursor::seek_key(
         vec![seg1.file_id(), seg2.file_id()],
         vec![0],
         b"i",

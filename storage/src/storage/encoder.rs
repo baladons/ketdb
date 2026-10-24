@@ -1,12 +1,12 @@
 use crate::{
     buffer::Buffer,
-    buffer_pool::BufferPool,
     dtos::{Encoding, Frame},
     encoding_utils::{compress_into, decompress_into, decrypt_in_place, encrypt_in_place},
     error::Error,
     file_id::FileId,
-    key_manager::KeyManager,
 };
+
+use super::{buffer_pool::BufferPool, key_manager::KeyManager};
 
 pub struct Encoder;
 

@@ -4,7 +4,7 @@ use rkyv::{access, access_unchecked, option::ArchivedOption, rend::u32_le};
 
 use crate::{
     batch::Batch,
-    binary_search::{binary_search, SearchResult},
+    binary_search::{SearchResult, binary_search},
     buffer::Buffer,
     dtos::ArchivedBlockFooter,
     error::Error,
@@ -98,8 +98,7 @@ impl Block {
             ArchivedOption::Some(fixed_width) => {
                 let fixed_width = fixed_width.to_native() as usize;
                 let start = fixed_width * index;
-                let end = start + fixed_width;
-                let data = &self.buffer[start..end];
+                let data = &self.buffer[start..self.footer_offset];
                 Batch::Fixed(data, fixed_width)
             }
         }

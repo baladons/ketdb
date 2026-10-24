@@ -9,8 +9,7 @@ use crate::{
     dtos::{Encoding, Frame},
     error::Error,
     file_id::FileId,
-    last_frame_manager::{last_frame_page_offset, write_last_frame_page_bytes},
-    storage::Storage,
+    storage::{last_frame_page_offset, write_last_frame_page_bytes, Storage},
 };
 
 pub struct FrameWriter {

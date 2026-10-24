@@ -1,33 +1,35 @@
 use crate::{
     batch::Batch,
     block::Block,
-    cursor::Cursor,
     error::Error,
     file_id::FileId,
     segment::{BlockKind, Segment},
     storage::Storage,
 };
 
-pub struct SequentialCursor {
+use super::segment_cursor::SegmentCursor;
+
+pub struct UnorderedCursor {
     file_ids: Vec<FileId>,
     segment_index: usize,
     column_ids: Vec<u32>,
-    cursor: Cursor,
+    segment_cursor: SegmentCursor,
 }
 
-impl SequentialCursor {
+impl UnorderedCursor {
     pub async fn seek_first(
         file_ids: Vec<FileId>,
         column_ids: Vec<u32>,
         storage: &mut Storage,
     ) -> Result<Self, Error> {
         let segment = open_segment_at(&file_ids, 0, storage).await?;
-        let cursor = Cursor::seek_first(segment, column_ids.clone(), storage).await?;
+        let segment_cursor =
+            SegmentCursor::seek_first(segment, column_ids.clone(), storage).await?;
         Ok(Self {
             file_ids,
             segment_index: 0,
             column_ids,
-            cursor,
+            segment_cursor,
         })
     }
 
@@ -42,35 +44,37 @@ impl SequentialCursor {
             if !segment_contains_key(&segment, storage, key).await? {
                 continue;
             }
-            let cursor = Cursor::seek_key(segment, column_ids.clone(), key, storage).await?;
+            let segment_cursor =
+                SegmentCursor::seek_key(segment, column_ids.clone(), key, storage).await?;
             return Ok(Self {
                 file_ids,
                 segment_index,
                 column_ids,
-                cursor,
+                segment_cursor,
             });
         }
 
         Err(Error::DeserializationFailure)
     }
 
-    /// Advance to the next data block, opening the next segment when the current one is exhausted.
-    /// Returns `false` when there is no further position.
-    pub async fn advance(&mut self, storage: &mut Storage) -> Result<bool, Error> {
-        let next_row = self.cursor.row_index() + 1;
-        if Cursor::row_index_exists(self.cursor.segment(), &self.column_ids, next_row) {
-            self.cursor.load_at_row_index(storage, next_row).await?;
-            return Ok(true);
-        }
+    /// Advance by `count` rows, opening the next segment when the current one is exhausted.
+    /// Returns `false` if any step cannot be advanced (including past the last row).
+    pub async fn advance(&mut self, storage: &mut Storage, count: u32) -> Result<bool, Error> {
+        for _ in 0..count {
+            if self.segment_cursor.advance(storage, 1).await? {
+                continue;
+            }
 
-        let next_segment = self.segment_index + 1;
-        if next_segment >= self.file_ids.len() {
-            return Ok(false);
-        }
+            let next_segment = self.segment_index + 1;
+            if next_segment >= self.file_ids.len() {
+                return Ok(false);
+            }
 
-        let segment = open_segment_at(&self.file_ids, next_segment, storage).await?;
-        self.cursor = Cursor::seek_first(segment, self.column_ids.clone(), storage).await?;
-        self.segment_index = next_segment;
+            let segment = open_segment_at(&self.file_ids, next_segment, storage).await?;
+            self.segment_cursor =
+                SegmentCursor::seek_first(segment, self.column_ids.clone(), storage).await?;
+            self.segment_index = next_segment;
+        }
         Ok(true)
     }
 
@@ -87,7 +91,7 @@ impl SequentialCursor {
     }
 
     pub fn segment(&self) -> &Segment {
-        self.cursor.segment()
+        self.segment_cursor.segment()
     }
 
     pub fn column_ids(&self) -> &[u32] {
@@ -95,15 +99,15 @@ impl SequentialCursor {
     }
 
     pub fn row_index(&self) -> u32 {
-        self.cursor.row_index()
+        self.segment_cursor.row_index()
     }
 
-    pub fn blocks(&self) -> &[Block] {
-        self.cursor.blocks()
+    pub fn blocks(&self) -> Vec<&Block> {
+        self.segment_cursor.blocks()
     }
 
     pub fn batch_read(&self) -> Vec<Batch<'_>> {
-        self.cursor.batch_read()
+        self.segment_cursor.batch_read()
     }
 }
 
@@ -127,8 +131,8 @@ async fn segment_contains_key(
     }
 
     let last_handle_index = column.data_blocks.len() - 1;
-    let first_block = segment.block(storage, BlockKind::Data, 0, 0).await?;
-    let last_block = segment
+    let (first_block, _) = segment.block(storage, BlockKind::Data, 0, 0).await?;
+    let (last_block, _) = segment
         .block(storage, BlockKind::Data, 0, last_handle_index)
         .await?;
 

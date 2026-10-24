@@ -1,10 +1,10 @@
 use crate::{
-    block_writer::BlockWriter,
     dtos::{ColumnHandle, Encoding, Frame},
     error::Error,
-    frame_writer::FrameWriter,
     storage::Storage,
 };
+
+use super::{block_writer::BlockWriter, frame_writer::FrameWriter};
 
 pub struct ColumnWriter {
     id: u32,
@@ -36,13 +36,23 @@ impl ColumnWriter {
         let will_flush = self.data.write(data, frame_writer, storage).await?;
 
         if will_flush {
-            self.min
-                .write(self.data.min_value(), frame_writer, storage)
-                .await?;
-            self.max
-                .write(self.data.max_value(), frame_writer, storage)
-                .await?;
+            self.write_min_max(frame_writer, storage).await?;
         }
+
+        Ok(())
+    }
+
+    async fn write_min_max(
+        &mut self,
+        frame_writer: &mut FrameWriter,
+        storage: &mut Storage,
+    ) -> Result<(), Error> {
+        self.min
+            .write(self.data.min_value(), frame_writer, storage)
+            .await?;
+        self.max
+            .write(self.data.max_value(), frame_writer, storage)
+            .await?;
 
         Ok(())
     }
@@ -53,12 +63,7 @@ impl ColumnWriter {
         storage: &mut Storage,
     ) -> Result<ColumnHandle, Error> {
         if !self.data.is_empty() {
-            self.min
-                .write(self.data.min_value(), frame_writer, storage)
-                .await?;
-            self.max
-                .write(self.data.max_value(), frame_writer, storage)
-                .await?;
+            self.write_min_max(frame_writer, storage).await?;
         }
 
         Ok(ColumnHandle {

@@ -2,13 +2,13 @@ use rkyv::api::high::to_bytes_in;
 
 use crate::{
     buffer::Buffer,
-    column_writer::ColumnWriter,
     dtos::{Encoding, SegmentFooter},
     error::Error,
     file_id::FileId,
-    frame_writer::FrameWriter,
     storage::Storage,
 };
+
+use super::{column_writer::ColumnWriter, frame_writer::FrameWriter};
 
 pub struct SegmentWriter {
     file_id: FileId,

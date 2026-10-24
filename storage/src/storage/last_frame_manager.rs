@@ -7,12 +7,12 @@ use compio::{
 
 use crate::{
     buffer::PAGE_SIZE,
-    buffer_pool::BufferPool,
     dtos::{Encoding, Frame},
     error::Error,
     file_id::FileId,
-    file_manager::FileManager,
 };
+
+use super::{buffer_pool::BufferPool, file_manager::FileManager};
 
 pub struct LastFrameManager {
     cache: HashMap<FileId, Frame>,

@@ -46,15 +46,43 @@ impl Segment {
         Self::new(file_id, buffer)
     }
 
-    pub async fn search(&self, storage: &mut Storage, key: &[u8]) -> Result<u32, Error> {
-        let min_block_index = self.search_min_block_index(storage, key).await?;
-        let index_in_min = self
-            .search_index_in_min_block(storage, min_block_index, key)
+    pub async fn search_row_index(
+        &self,
+        storage: &mut Storage,
+        key: &[u8],
+    ) -> Result<SearchResult, Error> {
+        let data_block_index = self.search_data_block_index(storage, key).await?;
+        let column = self.key_column().ok_or(Error::DeserializationFailure)?;
+        let row_offset = column.data_blocks[data_block_index].row_offset.to_native();
+
+        let (data, _) = self
+            .block(storage, BlockKind::Data, KEY_COLUMN_ID, data_block_index)
             .await?;
 
+        let index_in_data = data.search(key).await;
+
+        Ok(index_in_data.map(|index| index + row_offset))
+    }
+
+    pub async fn search_data_block_index(
+        &self,
+        storage: &mut Storage,
+        key: &[u8],
+    ) -> Result<usize, Error> {
+        let min_block_index = self.search_min_block_index(storage, key).await?;
         let column = self.key_column().ok_or(Error::DeserializationFailure)?;
-        let start_data_block_index = column.min_blocks[min_block_index].row_offset.to_native();
-        Ok(start_data_block_index + index_in_min as u32)
+        let min_row_offset = column.min_blocks[min_block_index].row_offset.to_native();
+
+        let (block, _) = self
+            .block(storage, BlockKind::Min, KEY_COLUMN_ID, min_block_index)
+            .await?;
+        let pick = block.search(key).await;
+        let mut index_in_min = pick.index() as usize;
+        if index_in_min == block.len() || block.get(index_in_min) > key {
+            index_in_min = index_in_min.saturating_sub(1);
+        }
+
+        Ok(min_row_offset as usize + index_in_min)
     }
 
     pub async fn search_min_block_index(
@@ -68,31 +96,18 @@ impl Segment {
             return Err(Error::DeserializationFailure);
         }
 
-        let pick = binary_search(min_handles.len(), async |mid| {
-            let block = self.min_block(storage, mid).await?;
+        let index = binary_search(min_handles.len(), async |mid| {
+            let (block, _) = self
+                .block(storage, BlockKind::Min, KEY_COLUMN_ID, mid)
+                .await?;
             Ok(block.get(0).cmp(key))
         })
         .await?;
 
-        Ok(match pick {
-            SearchResult::Found(index) => index,
-            SearchResult::NotFound(index) => index.saturating_sub(1),
+        Ok(match index {
+            SearchResult::Found(index) => index as usize,
+            SearchResult::NotFound(index) => index.saturating_sub(1) as usize,
         })
-    }
-
-    pub async fn search_index_in_min_block(
-        &self,
-        storage: &mut Storage,
-        min_block_index: usize,
-        key: &[u8],
-    ) -> Result<usize, Error> {
-        let block = self.min_block(storage, min_block_index).await?;
-        let pick = block.search(key).await;
-        let mut index = pick.index();
-        if index == block.len() || block.get(index) > key {
-            index = index.saturating_sub(1);
-        }
-        Ok(index)
     }
 
     pub async fn block(
@@ -101,7 +116,7 @@ impl Segment {
         block_kind: BlockKind,
         column_id: u32,
         block_index: usize,
-    ) -> Result<Block, Error> {
+    ) -> Result<(Block, &ArchivedBlockHandle), Error> {
         let column = self
             .column(column_id)
             .ok_or(Error::DeserializationFailure)?;
@@ -113,15 +128,8 @@ impl Segment {
         let handle = blocks
             .get(block_index)
             .ok_or(Error::DeserializationFailure)?;
-        self.block_from_handle(storage, handle).await
-    }
 
-    async fn min_block(&self, storage: &mut Storage, index: usize) -> Result<Block, Error> {
-        let column = self
-            .column(KEY_COLUMN_ID)
-            .ok_or(Error::DeserializationFailure)?;
-        let handle = &column.min_blocks[index];
-        self.block_from_handle(storage, handle).await
+        Ok((self.block_from_handle(storage, handle).await?, handle))
     }
 
     pub fn column(&self, id: u32) -> Option<&ArchivedColumnHandle> {
@@ -131,7 +139,7 @@ impl Segment {
             .find(|column| column.id.to_native() == id)
     }
 
-    pub fn data_block_index_with_row_index(
+    pub fn block_index_from_row_index(
         &self,
         column_id: u32,
         row_index: u32,
@@ -142,9 +150,19 @@ impl Segment {
 
         let handles = column.data_blocks.as_slice();
 
-        match handles.binary_search_by(|handle| handle.row_offset.to_native().cmp(&row_index)) {
-            Ok(index) => Ok(index),
-            Err(index) => Ok(index.saturating_sub(1)),
+        let index = match handles
+            .binary_search_by(|handle| handle.row_offset.to_native().cmp(&row_index))
+        {
+            Ok(index) => index,
+            Err(index) => index.saturating_sub(1),
+        };
+        let handle = handles.get(index).ok_or(Error::DeserializationFailure)?;
+        let start = handle.row_offset.to_native();
+        let end = start + handle.row_len.to_native();
+        if row_index < start || row_index >= end {
+            Err(Error::DeserializationFailure)
+        } else {
+            Ok(index)
         }
     }
 
