@@ -3,7 +3,7 @@ use crate::{
     block::Block,
     error::Error,
     segment::{BlockKind, Segment},
-    storage::Storage,
+    context::Context,
 };
 
 pub struct BlockCursor {
@@ -19,12 +19,12 @@ impl BlockCursor {
         segment: &Segment,
         column_id: u32,
         row_index: u32,
-        storage: &mut Storage,
+        context: &mut Context,
     ) -> Result<Self, Error> {
         let block_index = segment.block_index_from_row_index(column_id, row_index)?;
 
         let (block, handle) = segment
-            .block(storage, BlockKind::Data, column_id, block_index)
+            .block(context, BlockKind::Data, column_id, block_index)
             .await?;
 
         Ok(Self {
@@ -59,7 +59,7 @@ impl BlockCursor {
     pub async fn advance(
         &mut self,
         segment: &Segment,
-        storage: &mut Storage,
+        context: &mut Context,
         count: u32,
     ) -> Result<u32, Error> {
         let mut remaining = count;
@@ -85,7 +85,7 @@ impl BlockCursor {
             }
 
             let (block, handle) = segment
-                .block(storage, BlockKind::Data, self.column_id, self.block_index)
+                .block(context, BlockKind::Data, self.column_id, self.block_index)
                 .await?;
 
             self.row_offset = handle.row_offset.to_native();

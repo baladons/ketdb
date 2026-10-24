@@ -5,7 +5,7 @@ use crate::{
     dtos::{Encoding, SegmentFooter},
     error::Error,
     file_id::FileId,
-    storage::Storage,
+    context::Context,
 };
 
 use super::{column_writer::ColumnWriter, frame_writer::FrameWriter};
@@ -30,12 +30,12 @@ impl SegmentWriter {
     pub async fn write(
         &mut self,
         frame_writer: &mut FrameWriter,
-        storage: &mut Storage,
+        context: &mut Context,
         column_id: u32,
         data: &[u8],
     ) -> Result<(), Error> {
         self.column_writer(column_id)
-            .write(frame_writer, storage, data)
+            .write(frame_writer, context, data)
             .await?;
 
         Ok(())
@@ -44,11 +44,11 @@ impl SegmentWriter {
     pub async fn finish(
         self,
         frame_writer: &mut FrameWriter,
-        storage: &mut Storage,
+        context: &mut Context,
     ) -> Result<FileId, Error> {
         let mut column_handles = Vec::with_capacity(self.columns.len());
         for column in self.columns {
-            column_handles.push(column.finish(frame_writer, storage).await?);
+            column_handles.push(column.finish(frame_writer, context).await?);
         }
 
         let footer = SegmentFooter {
@@ -61,7 +61,7 @@ impl SegmentWriter {
         to_bytes_in::<_, rkyv::rancor::Error>(&footer, &mut *buffer)
             .map_err(|_| Error::SerializationFailure)?;
 
-        frame_writer.finish(storage, buffer).await?;
+        frame_writer.finish(context, buffer).await?;
 
         Ok(self.file_id)
     }

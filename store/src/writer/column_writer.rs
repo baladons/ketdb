@@ -1,7 +1,7 @@
 use crate::{
     dtos::{ColumnHandle, Encoding, Frame},
     error::Error,
-    storage::Storage,
+    context::Context,
 };
 
 use super::{block_writer::BlockWriter, frame_writer::FrameWriter};
@@ -30,13 +30,13 @@ impl ColumnWriter {
     pub async fn write(
         &mut self,
         frame_writer: &mut FrameWriter,
-        storage: &mut Storage,
+        context: &mut Context,
         data: &[u8],
     ) -> Result<(), Error> {
-        let will_flush = self.data.write(data, frame_writer, storage).await?;
+        let will_flush = self.data.write(data, frame_writer, context).await?;
 
         if will_flush {
-            self.write_min_max(frame_writer, storage).await?;
+            self.write_min_max(frame_writer, context).await?;
         }
 
         Ok(())
@@ -45,13 +45,13 @@ impl ColumnWriter {
     async fn write_min_max(
         &mut self,
         frame_writer: &mut FrameWriter,
-        storage: &mut Storage,
+        context: &mut Context,
     ) -> Result<(), Error> {
         self.min
-            .write(self.data.min_value(), frame_writer, storage)
+            .write(self.data.min_value(), frame_writer, context)
             .await?;
         self.max
-            .write(self.data.max_value(), frame_writer, storage)
+            .write(self.data.max_value(), frame_writer, context)
             .await?;
 
         Ok(())
@@ -60,17 +60,17 @@ impl ColumnWriter {
     pub async fn finish(
         mut self,
         frame_writer: &mut FrameWriter,
-        storage: &mut Storage,
+        context: &mut Context,
     ) -> Result<ColumnHandle, Error> {
         if !self.data.is_empty() {
-            self.write_min_max(frame_writer, storage).await?;
+            self.write_min_max(frame_writer, context).await?;
         }
 
         Ok(ColumnHandle {
             id: self.id,
-            data_blocks: self.data.finish(frame_writer, storage).await?,
-            min_blocks: self.min.finish(frame_writer, storage).await?,
-            max_blocks: self.max.finish(frame_writer, storage).await?,
+            data_blocks: self.data.finish(frame_writer, context).await?,
+            min_blocks: self.min.finish(frame_writer, context).await?,
+            max_blocks: self.max.finish(frame_writer, context).await?,
             bloom_filter: Frame {
                 encoding: Encoding::plain(),
                 uncompressed_size: 0,

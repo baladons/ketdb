@@ -9,7 +9,7 @@ use crate::{
     dtos::{Encoding, Frame},
     error::Error,
     file_id::FileId,
-    storage::{last_frame_page_offset, write_last_frame_page_bytes, Storage},
+    context::{last_frame_page_offset, write_last_frame_page_bytes, Context},
 };
 
 pub struct FrameWriter {
@@ -38,14 +38,14 @@ impl FrameWriter {
 
     pub async fn write(
         &mut self,
-        storage: &mut Storage,
+        context: &mut Context,
         encoding: Encoding,
         buffer: Buffer,
     ) -> Result<Frame, Error> {
         debug_assert!(self.offset % PAGE_SIZE as u64 == 0);
 
         let uncompressed_size = buffer.len() as u32;
-        let mut encoded = storage
+        let mut encoded = context
             .encode_buffer(self.file_id, &buffer, encoding)
             .await?;
 
@@ -56,11 +56,11 @@ impl FrameWriter {
         let offset = self.offset;
         let BufResult(result, encoded) = self.file.write_all_at(encoded, offset).await;
         result.map_err(Error::IoError)?;
-        storage.recycle_encoded_buffer(encoded);
+        context.recycle_encoded_buffer(encoded);
 
         self.offset = (offset + len as u64).next_multiple_of(PAGE_SIZE as u64);
 
-        storage.invalidate_cached_frame(self.file_id, offset);
+        context.invalidate_cached_frame(self.file_id, offset);
 
         Ok(Frame {
             encoding,
@@ -71,20 +71,20 @@ impl FrameWriter {
         })
     }
 
-    pub async fn finish(&mut self, storage: &mut Storage, buffer: Buffer) -> Result<(), Error> {
-        let frame = self.write(storage, Encoding::plain(), buffer).await?;
-        self.write_last_frame_page(storage, frame).await
+    pub async fn finish(&mut self, context: &mut Context, buffer: Buffer) -> Result<(), Error> {
+        let frame = self.write(context, Encoding::plain(), buffer).await?;
+        self.write_last_frame_page(context, frame).await
     }
 
     async fn write_last_frame_page(
         &mut self,
-        storage: &mut Storage,
+        context: &mut Context,
         frame: Frame,
     ) -> Result<(), Error> {
         let file_len = self.file.metadata().await.map_err(Error::IoError)?.len();
         let page_offset = last_frame_page_offset(file_len);
 
-        let pool = storage.buffer_pool_mut();
+        let pool = context.buffer_pool_mut();
         let mut page = pool.get(PAGE_SIZE);
         write_last_frame_page_bytes(&mut page, &frame);
         page.before_write();
@@ -93,7 +93,7 @@ impl FrameWriter {
         result.map_err(Error::IoError)?;
         pool.recycle(page);
 
-        storage.cache_last_frame(self.file_id, frame);
+        context.cache_last_frame(self.file_id, frame);
 
         Ok(())
     }

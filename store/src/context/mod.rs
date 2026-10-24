@@ -22,7 +22,7 @@ use crate::{
     block::Block, buffer::Buffer, dtos::{ArchivedBlockHandle, ArchivedFrame, Encoding, Frame}, error::Error, file_id::FileId,
 };
 
-pub struct Storage {
+pub struct Context {
     buffer_manager: BufferManager,
     buffer_pool: BufferPool,
     encoder: Encoder,
@@ -31,7 +31,7 @@ pub struct Storage {
     file_manager: FileManager,
 }
 
-impl Storage {
+impl Context {
     pub fn new(n_files: u64, n_bytes: u64) -> Self {
         Self {
             buffer_manager: BufferManager::new(n_bytes),

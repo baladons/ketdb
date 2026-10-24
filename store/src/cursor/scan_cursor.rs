@@ -1,5 +1,5 @@
 use crate::{
-    batch::Batch, block::Block, error::Error, file_id::FileId, segment::Segment, storage::Storage,
+    batch::Batch, block::Block, context::Context, error::Error, file_id::FileId, segment::Segment,
 };
 
 use super::segment_cursor::SegmentCursor;
@@ -15,12 +15,12 @@ impl ScanCursor {
     pub async fn seek_first(
         file_ids: Vec<FileId>,
         column_ids: Vec<u32>,
-        storage: &mut Storage,
+        context: &mut Context,
     ) -> Result<Self, Error> {
         let file_id = file_ids.first().ok_or(Error::DeserializationFailure)?;
-        let segment = Segment::open(storage, *file_id).await?;
+        let segment = Segment::open(context, *file_id).await?;
         let segment_cursor =
-            SegmentCursor::seek_first(segment, column_ids.clone(), storage).await?;
+            SegmentCursor::seek_first(segment, column_ids.clone(), context).await?;
         Ok(Self {
             file_ids,
             segment_index: 0,
@@ -29,10 +29,10 @@ impl ScanCursor {
         })
     }
 
-    pub async fn advance(&mut self, storage: &mut Storage, count: u32) -> Result<u32, Error> {
+    pub async fn advance(&mut self, context: &mut Context, count: u32) -> Result<u32, Error> {
         let mut remaining = count;
         loop {
-            remaining = self.segment_cursor.advance(storage, remaining).await?;
+            remaining = self.segment_cursor.advance(context, remaining).await?;
 
             if remaining == 0 {
                 return Ok(0);
@@ -45,9 +45,9 @@ impl ScanCursor {
             }
 
             let file_id = self.file_ids[self.segment_index];
-            let segment = Segment::open(storage, file_id).await?;
+            let segment = Segment::open(context, file_id).await?;
             self.segment_cursor =
-                SegmentCursor::seek_first(segment, self.column_ids.clone(), storage).await?;
+                SegmentCursor::seek_first(segment, self.column_ids.clone(), context).await?;
         }
     }
 

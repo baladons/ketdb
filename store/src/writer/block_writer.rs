@@ -2,7 +2,7 @@ use crate::{
     block_mut::BlockMut,
     dtos::{BlockHandle, Encoding},
     error::Error,
-    storage::Storage,
+    context::Context,
 };
 
 use super::frame_writer::FrameWriter;
@@ -45,10 +45,10 @@ impl BlockWriter {
     pub async fn finish(
         self,
         frame_writer: &mut FrameWriter,
-        storage: &mut Storage,
+        context: &mut Context,
     ) -> Result<Vec<BlockHandle>, Error> {
         let mut writer = self;
-        writer.flush(frame_writer, storage).await?;
+        writer.flush(frame_writer, context).await?;
         Ok(writer.written)
     }
 
@@ -56,10 +56,10 @@ impl BlockWriter {
         &mut self,
         data: &[u8],
         frame_writer: &mut FrameWriter,
-        storage: &mut Storage,
+        context: &mut Context,
     ) -> Result<bool, Error> {
         if self.over_threshold() {
-            self.flush(frame_writer, storage).await?;
+            self.flush(frame_writer, context).await?;
         }
 
         self.active.write(data);
@@ -70,7 +70,7 @@ impl BlockWriter {
     async fn flush(
         &mut self,
         frame_writer: &mut FrameWriter,
-        storage: &mut Storage,
+        context: &mut Context,
     ) -> Result<(), Error> {
         if self.active.is_empty() {
             return Ok(());
@@ -81,7 +81,7 @@ impl BlockWriter {
         let mut block = std::mem::replace(&mut self.active, BlockMut::new());
         let footer_offset = block.flush()?;
         let buffer = block.into_buffer();
-        let frame = frame_writer.write(storage, self.encoding, buffer).await?;
+        let frame = frame_writer.write(context, self.encoding, buffer).await?;
 
         self.written.push(BlockHandle {
             frame,

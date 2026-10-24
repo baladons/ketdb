@@ -8,5 +8,5 @@ pub mod dtos;
 pub mod error;
 pub mod file_id;
 pub mod segment;
-pub mod storage;
+pub mod context;
 pub mod writer;

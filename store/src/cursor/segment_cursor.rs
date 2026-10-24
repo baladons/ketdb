@@ -1,4 +1,4 @@
-use crate::{batch::Batch, block::Block, error::Error, segment::Segment, storage::Storage};
+use crate::{batch::Batch, block::Block, context::Context, error::Error, segment::Segment};
 
 use super::block_cursor::BlockCursor;
 
@@ -12,26 +12,26 @@ impl SegmentCursor {
     pub async fn seek_first(
         segment: Segment,
         column_ids: Vec<u32>,
-        storage: &mut Storage,
+        context: &mut Context,
     ) -> Result<Self, Error> {
-        Self::at_row_index(segment, column_ids, storage, 0).await
+        Self::at_row_index(segment, column_ids, context, 0).await
     }
 
     pub async fn seek_key(
         segment: Segment,
         column_ids: Vec<u32>,
         key: &[u8],
-        storage: &mut Storage,
+        context: &mut Context,
     ) -> Result<Self, Error> {
-        let row_index = segment.search_row_index(storage, key).await?.index();
-        Self::at_row_index(segment, column_ids, storage, row_index).await
+        let row_index = segment.search_row_index(context, key).await?.index();
+        Self::at_row_index(segment, column_ids, context, row_index).await
     }
 
-    pub async fn advance(&mut self, storage: &mut Storage, count: u32) -> Result<u32, Error> {
+    pub async fn advance(&mut self, context: &mut Context, count: u32) -> Result<u32, Error> {
         let mut remaining = 0u32;
 
         for cursor in &mut self.cursors {
-            let new_remaining = cursor.advance(&self.segment, storage, count).await?;
+            let new_remaining = cursor.advance(&self.segment, context, count).await?;
             debug_assert!(remaining == 0 || remaining == new_remaining);
             remaining = new_remaining;
         }
@@ -79,14 +79,14 @@ impl SegmentCursor {
     async fn at_row_index(
         segment: Segment,
         column_ids: Vec<u32>,
-        storage: &mut Storage,
+        context: &mut Context,
         row_index: u32,
     ) -> Result<Self, Error> {
         let mut cursors = Vec::with_capacity(column_ids.len());
 
         for column_id in &column_ids {
             cursors
-                .push(BlockCursor::at_row_index(&segment, *column_id, row_index, storage).await?);
+                .push(BlockCursor::at_row_index(&segment, *column_id, row_index, context).await?);
         }
 
         Ok(Self {
