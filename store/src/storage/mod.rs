@@ -1,5 +1,6 @@
 mod buffer_manager;
 mod buffer_pool;
+mod encoding_utils;
 mod encoder;
 mod file_manager;
 mod key_manager;

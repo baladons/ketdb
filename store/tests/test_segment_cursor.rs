@@ -1,9 +1,9 @@
 use std::fs;
 use std::sync::Mutex;
 
-use storage::{
+use store::{
     binary_search::SearchResult,
-    cursor::{SegmentCursor, UnorderedCursor},
+    cursor::{ScanCursor, SegmentCursor},
     file_id::FileId,
     segment::Segment,
     writer::{FrameWriter, SegmentWriter},
@@ -167,15 +167,15 @@ async fn cursor_seek_key_across_data_blocks() {
 }
 
 #[compio::test]
-async fn unordered_cursor_opens_first_segment_from_disk() {
+async fn scan_cursor_opens_first_segment_from_disk() {
     let _workspace = chdir_to_data_workspace();
     let mut storage = Storage::new(16, 8 * 1024 * 1024);
     let segment = write_segment(&mut storage, 1024).await;
     let file_id = segment.file_id();
 
-    let cursor = UnorderedCursor::seek_first(vec![file_id], vec![0, 1], &mut storage)
+    let cursor = ScanCursor::seek_first(vec![file_id], vec![0, 1], &mut storage)
         .await
-        .expect("unordered seek_first");
+        .expect("scan seek_first");
 
     assert_eq!(cursor.current_file_id(), file_id);
     assert_eq!(cursor.segment_index(), 0);
@@ -184,14 +184,14 @@ async fn unordered_cursor_opens_first_segment_from_disk() {
 }
 
 #[compio::test]
-async fn unordered_cursor_advances_across_segments() {
+async fn scan_cursor_advances_across_segments() {
     let _workspace = chdir_to_data_workspace();
     let mut storage = Storage::new(16, 8 * 1024 * 1024);
 
     let seg1 = write_segment_keys(&mut storage, 0, &[b"a", b"c"]).await;
     let seg2 = write_segment_keys(&mut storage, 0, &[b"g", b"i"]).await;
 
-    let mut cursor = UnorderedCursor::seek_first(
+    let mut cursor = ScanCursor::seek_first(
         vec![seg1.file_id(), seg2.file_id()],
         vec![0],
         &mut storage,
@@ -220,14 +220,14 @@ async fn unordered_cursor_advances_across_segments() {
 }
 
 #[compio::test]
-async fn unordered_cursor_seek_key_finds_later_segment() {
+async fn scan_cursor_seek_key_finds_later_segment() {
     let _workspace = chdir_to_data_workspace();
     let mut storage = Storage::new(16, 8 * 1024 * 1024);
 
     let seg1 = write_segment_keys(&mut storage, 1024, &[b"a", b"c"]).await;
     let seg2 = write_segment_keys(&mut storage, 1024, &[b"g", b"i"]).await;
 
-    let cursor = UnorderedCursor::seek_key(
+    let cursor = ScanCursor::seek_key(
         vec![seg1.file_id(), seg2.file_id()],
         vec![0],
         b"i",

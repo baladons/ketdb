@@ -5,7 +5,6 @@ pub mod block_mut;
 pub mod buffer;
 pub mod cursor;
 pub mod dtos;
-pub mod encoding_utils;
 pub mod error;
 pub mod file_id;
 pub mod segment;
