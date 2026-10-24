@@ -243,7 +243,7 @@ async fn merge_cursor_merges_segments_by_key() {
 }
 
 #[compio::test]
-async fn merge_cursor_batch_stops_at_next_segment_key() {
+async fn merge_cursor_batch_is_one_row() {
     let _workspace = chdir_to_data_workspace();
     let mut context = Context::new(16, 8 * 1024 * 1024);
 
