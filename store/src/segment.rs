@@ -1,12 +1,12 @@
 use std::rc::Rc;
 
-use rkyv::{access, access_unchecked, deserialize};
+use rkyv::{access, access_unchecked};
 
 use crate::{
     binary_search::{SearchResult, binary_search},
     block::Block,
     buffer::Buffer,
-    dtos::{ArchivedBlockHandle, ArchivedColumnHandle, ArchivedFrame, ArchivedSegmentFooter},
+    dtos::{ArchivedBlockHandle, ArchivedColumnHandle, ArchivedSegmentFooter},
     error::Error,
     file_id::FileId,
     storage::Storage,
@@ -78,7 +78,7 @@ impl Segment {
             .await?;
         let pick = block.search(key).await;
         let mut index_in_min = pick.index() as usize;
-        if index_in_min == block.len() || block.get(index_in_min) > key {
+        if index_in_min == block.row_count() || block.get(index_in_min) > key {
             index_in_min = index_in_min.saturating_sub(1);
         }
 
@@ -129,7 +129,10 @@ impl Segment {
             .get(block_index)
             .ok_or(Error::DeserializationFailure)?;
 
-        Ok((self.block_from_handle(storage, handle).await?, handle))
+        Ok((
+            storage.block_from_handle(self.file_id, handle).await?,
+            handle,
+        ))
     }
 
     pub fn column(&self, id: u32) -> Option<&ArchivedColumnHandle> {
@@ -173,22 +176,5 @@ impl Segment {
     fn footer(&self) -> &ArchivedSegmentFooter {
         // SAFETY: we already checked it in new
         unsafe { access_unchecked(&self.footer_buffer) }
-    }
-
-    async fn block_from_handle(
-        &self,
-        storage: &mut Storage,
-        handle: &ArchivedBlockHandle,
-    ) -> Result<Block, Error> {
-        let frame = deserialize::<_, ArchivedFrame>(&handle.frame)
-            .map_err(|_| Error::DeserializationFailure)?;
-        storage
-            .read_block(
-                self.file_id,
-                frame,
-                handle.footer_offset.to_native() as usize,
-                true,
-            )
-            .await
     }
 }

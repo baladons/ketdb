@@ -31,29 +31,24 @@ impl ScanCursor {
 
     pub async fn advance(&mut self, storage: &mut Storage, count: u32) -> Result<u32, Error> {
         let mut remaining = count;
-        while remaining > 0 {
+        loop {
             remaining = self.segment_cursor.advance(storage, remaining).await?;
+
             if remaining == 0 {
                 return Ok(0);
             }
 
-            let next_segment = self.segment_index + 1;
-            if next_segment >= self.file_ids.len() {
+            self.segment_index += 1;
+
+            if self.segment_index >= self.file_ids.len() {
                 return Ok(remaining);
             }
 
-            let file_id = self.file_ids[next_segment];
+            let file_id = self.file_ids[self.segment_index];
             let segment = Segment::open(storage, file_id).await?;
             self.segment_cursor =
                 SegmentCursor::seek_first(segment, self.column_ids.clone(), storage).await?;
-            self.segment_index = next_segment;
-            remaining -= 1;
         }
-        Ok(0)
-    }
-
-    pub fn file_ids(&self) -> &[FileId] {
-        &self.file_ids
     }
 
     pub fn segment_index(&self) -> usize {
@@ -62,10 +57,6 @@ impl ScanCursor {
 
     pub fn current_file_id(&self) -> FileId {
         self.file_ids[self.segment_index]
-    }
-
-    pub fn segment(&self) -> &Segment {
-        self.segment_cursor.segment()
     }
 
     pub fn column_ids(&self) -> &[u32] {

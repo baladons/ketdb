@@ -27,11 +27,13 @@ impl SegmentCursor {
         Self::at_row_index(segment, column_ids, storage, row_index).await
     }
 
-    /// Returns how many rows of `count` could not be advanced (`0` if all succeeded).
     pub async fn advance(&mut self, storage: &mut Storage, count: u32) -> Result<u32, Error> {
         let mut remaining = 0u32;
+
         for cursor in &mut self.cursors {
-            remaining = remaining.max(cursor.advance(&self.segment, storage, count).await?);
+            let new_remaining = cursor.advance(&self.segment, storage, count).await?;
+            debug_assert!(remaining == 0 || remaining == new_remaining);
+            remaining = new_remaining;
         }
 
         Ok(remaining)
@@ -83,7 +85,8 @@ impl SegmentCursor {
         let mut cursors = Vec::with_capacity(column_ids.len());
 
         for column_id in &column_ids {
-            cursors.push(BlockCursor::at_row_index(&segment, *column_id, row_index, storage).await?);
+            cursors
+                .push(BlockCursor::at_row_index(&segment, *column_id, row_index, storage).await?);
         }
 
         Ok(Self {

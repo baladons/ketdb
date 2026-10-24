@@ -1,7 +1,7 @@
 mod buffer_manager;
 mod buffer_pool;
-mod encoding_utils;
 mod encoder;
+mod encoding_utils;
 mod file_manager;
 mod key_manager;
 mod last_frame_manager;
@@ -12,17 +12,14 @@ pub use encoder::Encoder;
 pub use file_manager::FileManager;
 pub use key_manager::{KeyEntry, KeyManager};
 pub use last_frame_manager::{
-    last_frame_page_offset, last_page_offset, write_last_frame_page_bytes, LastFrameManager,
+    LastFrameManager, last_frame_page_offset, last_page_offset, write_last_frame_page_bytes,
 };
+use rkyv::deserialize;
 
 use std::{rc::Rc, time::Duration};
 
 use crate::{
-    block::Block,
-    buffer::Buffer,
-    dtos::{Encoding, Frame},
-    error::Error,
-    file_id::FileId,
+    block::Block, buffer::Buffer, dtos::{ArchivedBlockHandle, ArchivedFrame, Encoding, Frame}, error::Error, file_id::FileId,
 };
 
 pub struct Storage {
@@ -44,6 +41,22 @@ impl Storage {
             key_manager: KeyManager::new(),
             file_manager: FileManager::new(n_files),
         }
+    }
+
+    pub async fn block_from_handle(
+        &mut self,
+        file_id: FileId,
+        handle: &ArchivedBlockHandle,
+    ) -> Result<Block, Error> {
+        let frame = deserialize::<_, ArchivedFrame>(&handle.frame)
+            .map_err(|_| Error::DeserializationFailure)?;
+        self.read_block(
+            file_id,
+            frame,
+            handle.footer_offset.to_native() as usize,
+            true,
+        )
+        .await
     }
 
     pub async fn read_block(

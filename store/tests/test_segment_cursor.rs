@@ -162,7 +162,7 @@ async fn cursor_seek_key_across_data_blocks() {
         .expect("seek_key");
 
     assert_eq!(cursor.row_index(), 2);
-    assert_eq!(cursor.blocks()[0].len(), 1);
+    assert_eq!(cursor.blocks()[0].row_count(), 1);
     assert_eq!(cursor.blocks()[0].get(0), b"e");
 }
 

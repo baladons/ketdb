@@ -31,27 +31,22 @@ impl Block {
         Self::new(buffer, footer_offset)
     }
 
-    pub fn len(&self) -> usize {
+    pub fn row_count(&self) -> usize {
         let footer = self.footer();
         match footer.fixed_width {
             ArchivedOption::None => footer.offsets.len().saturating_sub(1),
             ArchivedOption::Some(fixed_width) => {
-                let fixed_width = fixed_width.to_native() as usize;
-                if fixed_width == 0 {
-                    0
-                } else {
-                    self.footer_offset / fixed_width
-                }
+                self.footer_offset / fixed_width.to_native() as usize
             }
         }
     }
 
     pub async fn search(&self, key: &[u8]) -> SearchResult {
-        binary_search(self.len(), async |mid| {
+        binary_search(self.row_count(), async |mid| {
             Ok::<Ordering, Infallible>(self.get(mid).cmp(key))
         })
         .await
-        .expect("infallible compare")
+        .unwrap()
     }
 
     pub fn get(&self, index: usize) -> &[u8] {
@@ -69,17 +64,6 @@ impl Block {
                 let end = offsets[1] as usize;
                 &self.buffer[start..end]
             }
-        }
-    }
-
-    pub fn full_batch(&self) -> Batch<'_> {
-        let footer = self.footer();
-        match footer.fixed_width {
-            ArchivedOption::Some(fixed_width) => {
-                let fixed_width = fixed_width.to_native() as usize;
-                Batch::Fixed(&self.buffer[..self.footer_offset], fixed_width)
-            }
-            ArchivedOption::None => self.batch(0),
         }
     }
 
