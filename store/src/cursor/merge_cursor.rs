@@ -1,12 +1,18 @@
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
+
 use crate::{
-    batch::Batch, block::Block, context::Context, error::Error, file_id::FileId, segment::Segment,
+    batch::Batch,
+    context::Context,
+    error::Error,
+    file_id::FileId,
+    segment::{BlockKind, Segment},
 };
 
-use super::{block_cursor::BlockCursor, segment_cursor::SegmentCursor};
+use super::segment_cursor::SegmentCursor;
 
 pub struct MergeCursor {
-    column_ids: Vec<u32>,
-    cursors: Vec<SegmentCursor>,
+    heap: BinaryHeap<Reverse<SegmentCursor>>,
 }
 
 impl MergeCursor {
@@ -19,81 +25,96 @@ impl MergeCursor {
             return Err(Error::DeserializationFailure);
         }
 
-        let mut cursors = Vec::with_capacity(file_ids.len());
+        let mut heap = BinaryHeap::with_capacity(file_ids.len());
         for file_id in file_ids {
             let segment = Segment::open(context, file_id).await?;
-            cursors.push(SegmentCursor::seek_first(segment, column_ids.clone(), context).await?);
+            heap.push(Reverse(
+                SegmentCursor::seek_first(segment, column_ids.clone(), context).await?,
+            ));
         }
 
-        Ok(Self {
-            column_ids,
-            cursors,
-        })
+        Ok(Self { heap })
+    }
+
+    pub async fn seek_key(
+        file_ids: Vec<FileId>,
+        column_ids: Vec<u32>,
+        key: &[u8],
+        context: &mut Context,
+    ) -> Result<Self, Error> {
+        if !column_ids.contains(&0) {
+            return Err(Error::DeserializationFailure);
+        }
+
+        let mut heap = BinaryHeap::with_capacity(file_ids.len());
+        for file_id in file_ids {
+            let segment = Segment::open(context, file_id).await?;
+            if !has_key_at_or_after(&segment, context, key).await? {
+                continue;
+            }
+            heap.push(Reverse(
+                SegmentCursor::seek_key(segment, column_ids.clone(), key, context).await?,
+            ));
+        }
+
+        Ok(Self { heap })
     }
 
     /// Advance `count` merged rows. Returns how many could not be advanced.
     pub async fn advance(&mut self, context: &mut Context, count: u32) -> Result<u32, Error> {
         let mut remaining = count;
         while remaining > 0 {
-            let Some(index) = self.winner() else {
+            let Some(Reverse(mut cursor)) = self.heap.pop() else {
                 return Ok(remaining);
             };
 
-            self.cursors[index].advance(context, 1).await?;
-            if is_exhausted(&self.cursors[index]) {
-                self.cursors.swap_remove(index);
+            cursor.advance(context, 1).await?;
+            if !cursor.done() {
+                self.heap.push(Reverse(cursor));
+                remaining -= 1;
+                continue;
+            }
+
+            if self.heap.is_empty() {
+                return Ok(remaining);
             }
             remaining -= 1;
         }
         Ok(0)
     }
 
-    pub fn column_ids(&self) -> &[u32] {
-        &self.column_ids
-    }
-
-    pub fn blocks(&self) -> Vec<&Block> {
-        self.winner()
-            .map(|index| self.cursors[index].blocks())
-            .unwrap_or_default()
+    pub fn done(&self) -> bool {
+        self.heap.is_empty()
     }
 
     pub fn batch(&self) -> Vec<Batch<'_>> {
-        let Some(winner) = self.winner() else {
+        let Some(Reverse(cursor)) = self.heap.peek() else {
             return Vec::new();
         };
-        self.cursors[winner]
+        cursor
             .batch()
             .into_iter()
             .map(|batch| batch.truncate(1))
             .collect()
     }
-
-    fn winner(&self) -> Option<usize> {
-        self.cursors
-            .iter()
-            .enumerate()
-            .min_by(|a, b| current_key(a.1).cmp(current_key(b.1)).then(a.0.cmp(&b.0)))
-            .map(|(index, _)| index)
-    }
 }
 
-fn key_cursor(cursor: &SegmentCursor) -> &BlockCursor {
-    cursor
-        .block_cursors()
-        .iter()
-        .find(|cursor| cursor.column_id() == 0)
-        .expect("column 0")
-}
-
-fn current_key(cursor: &SegmentCursor) -> &[u8] {
-    let key_cursor = key_cursor(cursor);
-    key_cursor.block().get(key_cursor.index_in_block())
-}
-
-fn is_exhausted(cursor: &SegmentCursor) -> bool {
-    cursor
-        .block_cursors()
-        .first()
-        .is_some_and(|cursor| cursor.index_in_block() >= cursor.block().row_count())
+async fn has_key_at_or_after(
+    segment: &Segment,
+    context: &mut Context,
+    key: &[u8],
+) -> Result<bool, Error> {
+    let Some(column) = segment.column(0) else {
+        return Ok(false);
+    };
+    let Some(last_index) = column.data_blocks.len().checked_sub(1) else {
+        return Ok(false);
+    };
+    let (block, _) = segment
+        .block(context, BlockKind::Data, 0, last_index)
+        .await?;
+    let Some(last_row) = block.row_count().checked_sub(1) else {
+        return Ok(false);
+    };
+    Ok(block.get(last_row) >= key)
 }

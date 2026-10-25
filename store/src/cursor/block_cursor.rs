@@ -1,9 +1,9 @@
 use crate::{
     batch::Batch,
     block::Block,
+    context::Context,
     error::Error,
     segment::{BlockKind, Segment},
-    context::Context,
 };
 
 pub struct BlockCursor {
@@ -49,11 +49,18 @@ impl BlockCursor {
     }
 
     pub fn batch(&self) -> Batch<'_> {
+        if self.done() {
+            return Batch::empty();
+        }
         self.block.batch(self.index_in_block())
     }
 
     pub fn index_in_block(&self) -> usize {
         (self.row_index - self.row_offset) as usize
+    }
+
+    pub fn done(&self) -> bool {
+        self.index_in_block() >= self.block.row_count()
     }
 
     pub async fn advance(
@@ -76,9 +83,7 @@ impl BlockCursor {
             self.row_index += rows_left;
             self.block_index += 1;
 
-            let column = segment
-                .column(self.column_id)
-                .ok_or(Error::DeserializationFailure)?;
+            let column = segment.column(self.column_id).unwrap();
 
             if self.block_index >= column.data_blocks.len() {
                 return Ok(remaining);

@@ -34,10 +34,11 @@ impl ScanCursor {
         loop {
             remaining = self.segment_cursor.advance(context, remaining).await?;
 
-            if remaining == 0 {
-                return Ok(0);
+            if !self.segment_cursor.done() {
+                return Ok(remaining);
             }
 
+            remaining += 1;
             self.segment_index += 1;
 
             if self.segment_index >= self.file_ids.len() {
@@ -48,7 +49,12 @@ impl ScanCursor {
             let segment = Segment::open(context, file_id).await?;
             self.segment_cursor =
                 SegmentCursor::seek_first(segment, self.column_ids.clone(), context).await?;
+            remaining -= 1;
         }
+    }
+
+    pub fn done(&self) -> bool {
+        self.segment_index >= self.file_ids.len() || self.segment_cursor.done()
     }
 
     pub fn segment_index(&self) -> usize {

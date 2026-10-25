@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use crate::{batch::Batch, block::Block, context::Context, error::Error, segment::Segment};
 
 use super::block_cursor::BlockCursor;
@@ -23,7 +25,7 @@ impl SegmentCursor {
         key: &[u8],
         context: &mut Context,
     ) -> Result<Self, Error> {
-        let row_index = segment.search_row_index(context, key).await?.index();
+        let row_index = segment.row_index_from_key(context, key).await?.index();
         Self::at_row_index(segment, column_ids, context, row_index).await
     }
 
@@ -52,6 +54,10 @@ impl SegmentCursor {
             .first()
             .map(BlockCursor::row_index)
             .unwrap_or(0)
+    }
+
+    pub fn done(&self) -> bool {
+        self.cursors.iter().any(BlockCursor::done)
     }
 
     pub fn block_cursors(&self) -> &[BlockCursor] {
@@ -94,5 +100,35 @@ impl SegmentCursor {
             column_ids,
             cursors,
         })
+    }
+
+    fn key(&self) -> &[u8] {
+        let cursor = self
+            .cursors
+            .iter()
+            .find(|cursor| cursor.column_id() == 0)
+            .expect("column 0");
+        cursor.block().get(cursor.index_in_block())
+    }
+}
+
+/// Ordered by the column 0 key, smallest first.
+impl PartialEq for SegmentCursor {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for SegmentCursor {}
+
+impl PartialOrd for SegmentCursor {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for SegmentCursor {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.key().cmp(other.key())
     }
 }

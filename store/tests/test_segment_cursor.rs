@@ -1,38 +1,49 @@
-use std::fs;
+use std::fs::{self, File};
+use std::os::fd::AsRawFd;
 use std::sync::Mutex;
 
 use store::{
     binary_search::SearchResult,
+    context::Context,
     cursor::{MergeCursor, ScanCursor, SegmentCursor},
     file_id::FileId,
     segment::Segment,
     writer::{FrameWriter, SegmentWriter},
-    context::Context,
 };
 
 static DATA_DIR_LOCK: Mutex<()> = Mutex::new(());
 
 struct DataWorkspace {
-    _lock: std::sync::MutexGuard<'static, ()>,
     _dir: tempfile::TempDir,
+    _lock: std::sync::MutexGuard<'static, ()>,
+    _file_lock: File,
 }
 
 fn chdir_to_data_workspace() -> DataWorkspace {
     let lock = DATA_DIR_LOCK.lock().expect("lock");
+    let file_lock = lock_data_dir();
     let dir = tempfile::tempdir().expect("tempdir");
     std::env::set_current_dir(dir.path()).expect("chdir");
     fs::create_dir_all("data").expect("mkdir data");
     DataWorkspace {
-        _lock: lock,
         _dir: dir,
+        _lock: lock,
+        _file_lock: file_lock,
     }
 }
 
-async fn write_segment_keys(
-    context: &mut Context,
-    threshold: usize,
-    keys: &[&[u8]],
-) -> Segment {
+fn lock_data_dir() -> File {
+    let file = File::options()
+        .create(true)
+        .write(true)
+        .open("/tmp/ketdb-store-tests.lock")
+        .expect("lock file");
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+    assert_eq!(rc, 0, "flock");
+    file
+}
+
+async fn write_segment_keys(context: &mut Context, threshold: usize, keys: &[&[u8]]) -> Segment {
     let file_id = FileId::new_segment();
     let mut frame_writer = FrameWriter::open(file_id).await.expect("open frame writer");
     let mut segment_writer = SegmentWriter::new(file_id, threshold);
@@ -84,15 +95,24 @@ async fn segment_writer_flush_produces_searchable_segment() {
     let segment = write_segment(&mut context, 1024).await;
 
     assert_eq!(
-        segment.search_row_index(&mut context, b"a").await.expect("search"),
+        segment
+            .row_index_from_key(&mut context, b"a")
+            .await
+            .expect("search"),
         SearchResult::Found(0)
     );
     assert_eq!(
-        segment.search_row_index(&mut context, b"c").await.expect("search"),
+        segment
+            .row_index_from_key(&mut context, b"c")
+            .await
+            .expect("search"),
         SearchResult::Found(1)
     );
     assert_eq!(
-        segment.search_row_index(&mut context, b"e").await.expect("search"),
+        segment
+            .row_index_from_key(&mut context, b"e")
+            .await
+            .expect("search"),
         SearchResult::Found(2)
     );
 }
@@ -145,15 +165,24 @@ async fn cursor_seek_key_across_data_blocks() {
     let segment = write_segment(&mut context, 1).await;
 
     assert_eq!(
-        segment.search_row_index(&mut context, b"a").await.expect("search"),
+        segment
+            .row_index_from_key(&mut context, b"a")
+            .await
+            .expect("search"),
         SearchResult::Found(0)
     );
     assert_eq!(
-        segment.search_row_index(&mut context, b"c").await.expect("search"),
+        segment
+            .row_index_from_key(&mut context, b"c")
+            .await
+            .expect("search"),
         SearchResult::Found(1)
     );
     assert_eq!(
-        segment.search_row_index(&mut context, b"e").await.expect("search"),
+        segment
+            .row_index_from_key(&mut context, b"e")
+            .await
+            .expect("search"),
         SearchResult::Found(2)
     );
 
@@ -191,13 +220,10 @@ async fn scan_cursor_advances_across_segments() {
     let seg1 = write_segment_keys(&mut context, 0, &[b"a", b"c"]).await;
     let seg2 = write_segment_keys(&mut context, 0, &[b"g", b"i"]).await;
 
-    let mut cursor = ScanCursor::seek_first(
-        vec![seg1.file_id(), seg2.file_id()],
-        vec![0],
-        &mut context,
-    )
-    .await
-    .expect("seek_first");
+    let mut cursor =
+        ScanCursor::seek_first(vec![seg1.file_id(), seg2.file_id()], vec![0], &mut context)
+            .await
+            .expect("seek_first");
 
     assert_eq!(cursor.segment_index(), 0);
     assert_eq!(cursor.blocks()[0].get(0), b"a");
@@ -227,37 +253,15 @@ async fn merge_cursor_merges_segments_by_key() {
     let seg1 = write_segment_keys(&mut context, 0, &[b"a", b"c", b"e"]).await;
     let seg2 = write_segment_keys(&mut context, 0, &[b"b", b"d", b"f"]).await;
 
-    let mut cursor = MergeCursor::seek_first(
-        vec![seg1.file_id(), seg2.file_id()],
-        vec![0],
-        &mut context,
-    )
-    .await
-    .expect("seek_first");
+    let mut cursor =
+        MergeCursor::seek_first(vec![seg1.file_id(), seg2.file_id()], vec![0], &mut context)
+            .await
+            .expect("seek_first");
 
-    for key in [b"a".as_slice(), b"b", b"c", b"d", b"e", b"f"] {
-        assert_eq!(cursor.blocks()[0].get(0), key);
+    for key in [b"a".as_slice(), b"b", b"c", b"d", b"e"] {
+        assert_eq!(&cursor.batch()[0][0], key);
         assert_eq!(cursor.advance(&mut context, 1).await.expect("advance"), 0);
     }
+    assert_eq!(&cursor.batch()[0][0], b"f");
     assert_eq!(cursor.advance(&mut context, 1).await.expect("advance"), 1);
-}
-
-#[compio::test]
-async fn merge_cursor_batch_is_one_row() {
-    let _workspace = chdir_to_data_workspace();
-    let mut context = Context::new(16, 8 * 1024 * 1024);
-
-    let seg1 = write_segment_keys(&mut context, 1024, &[b"a", b"c", b"e"]).await;
-    let seg2 = write_segment_keys(&mut context, 1024, &[b"b"]).await;
-
-    let cursor = MergeCursor::seek_first(
-        vec![seg1.file_id(), seg2.file_id()],
-        vec![0],
-        &mut context,
-    )
-    .await
-    .expect("seek_first");
-
-    assert_eq!(cursor.blocks()[0].get(0), b"a");
-    assert_eq!(cursor.batch()[0].len(), 1);
 }
